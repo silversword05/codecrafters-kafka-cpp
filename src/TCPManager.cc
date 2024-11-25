@@ -35,13 +35,15 @@ std::string_view ResponseMessage::toBuffer() const {
 
     *reinterpret_cast<uint32_t *>(buffer) = htonl(message_size);
     *reinterpret_cast<int32_t *>(buffer + 4) = htonl(corellation_id);
+    *reinterpret_cast<int32_t *>(buffer + 8) = htons(error_code);
 
     return std::string_view(buffer, sizeof(buffer));
 }
 
 std::string ResponseMessage::toString() const {
     return "ResponseMessage{message_size=" + std::to_string(message_size) +
-           ", corellation_id=" + std::to_string(corellation_id) + "}";
+           ", corellation_id=" + std::to_string(corellation_id) +
+           ", error_code=" + std::to_string(error_code) + "}";
 }
 
 void TCPManager::createSocketAndListen() {
@@ -84,7 +86,7 @@ void TCPManager::createSocketAndListen() {
     std::cerr << "Logs from your program will appear here!\n";
 }
 
-Fd TCPManager::acceptConnections() {
+Fd TCPManager::acceptConnections() const {
     struct sockaddr_in client_addr {};
     socklen_t client_addr_len = sizeof(client_addr);
 
@@ -101,7 +103,7 @@ Fd TCPManager::acceptConnections() {
 }
 
 void TCPManager::writeBufferOnClientFd(
-    const Fd &client_fd, const ResponseMessage &response_message) {
+    const Fd &client_fd, const ResponseMessage &response_message) const {
 
     std::cout << "Sending msg to client: " << response_message.toString()
               << "\n";
@@ -117,7 +119,7 @@ void TCPManager::writeBufferOnClientFd(
     std::cout << "Message sent to client\n";
 }
 
-RequestMessage TCPManager::readBufferFromClientFd(const Fd &client_fd) {
+RequestMessage TCPManager::readBufferFromClientFd(const Fd &client_fd) const {
     RequestMessage request_message;
 
     constexpr size_t buffer_size = sizeof(RequestMessage);
@@ -134,4 +136,27 @@ RequestMessage TCPManager::readBufferFromClientFd(const Fd &client_fd) {
     std::cout << "Message received from client: " << request_message.toString()
               << "\n";
     return request_message;
+}
+
+KafkaApis::KafkaApis(const Fd &_client_fd, const TCPManager &_tcp_manager)
+    : client_fd(_client_fd), tcp_manager(_tcp_manager) {}
+
+void KafkaApis::checkApiVersions() const {
+    RequestMessage request_message =
+        tcp_manager.readBufferFromClientFd(client_fd);
+
+    ResponseMessage response_message{
+        .message_size = 0,
+        .corellation_id = request_message.corellation_id,
+        .error_code = 0,
+    };
+
+    if (request_message.request_api_version < 0 ||
+        request_message.request_api_version > 4) {
+        response_message.error_code = UNSUPPORTED_VERSION;
+        std::cout << "Unsupported version: "
+                  << request_message.request_api_version << "\n";
+    }
+
+    tcp_manager.writeBufferOnClientFd(client_fd, response_message);
 }

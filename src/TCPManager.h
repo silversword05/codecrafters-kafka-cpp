@@ -30,6 +30,7 @@ struct RequestMessage {
 struct ResponseMessage {
     uint32_t message_size{};
     int32_t corellation_id{};
+    int16_t error_code{};
 
     std::string_view toBuffer() const;
     std::string toString() const;
@@ -38,7 +39,7 @@ struct ResponseMessage {
 struct TCPManager {
     TCPManager() = default;
 
-    struct sockaddr_in getSocketAddr() {
+    static struct sockaddr_in getSocketAddr() {
         struct sockaddr_in server_addr {
             .sin_family = AF_INET, .sin_port = htons(9092),
         };
@@ -47,11 +48,24 @@ struct TCPManager {
     }
 
     void createSocketAndListen();
-    Fd acceptConnections();
+    Fd acceptConnections() const;
     void writeBufferOnClientFd(const Fd &client_fd,
-                               const ResponseMessage &response_message);
-    RequestMessage readBufferFromClientFd(const Fd &client_fd);
+                               const ResponseMessage &response_message) const;
+    RequestMessage readBufferFromClientFd(const Fd &client_fd) const;
 
   private:
     Fd server_fd;
+};
+
+struct KafkaApis {
+    KafkaApis(const Fd &_client_fd, const TCPManager &_tcp_manager);
+    ~KafkaApis() = default;
+
+    static constexpr uint32_t UNSUPPORTED_VERSION = 35;
+
+    void checkApiVersions() const;
+
+  private:
+    const Fd &client_fd;
+    const TCPManager &tcp_manager;
 };

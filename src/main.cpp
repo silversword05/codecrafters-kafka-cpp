@@ -16,16 +16,9 @@ int main(int argc, char *argv[]) {
     tcp_manager.createSocketAndListen();
 
     Fd client_fd = tcp_manager.acceptConnections();
+    KafkaApis kafka_apis(client_fd, tcp_manager);
 
-    RequestMessage request_message =
-        tcp_manager.readBufferFromClientFd(client_fd);
-
-    ResponseMessage response_message{
-        .message_size = 0,
-        .corellation_id = request_message.corellation_id,
-    };
-
-    tcp_manager.writeBufferOnClientFd(client_fd, response_message);
+    kafka_apis.checkApiVersions();
 
     // Hack to keep the program running for a while so that netcat can read the
     //  buffer

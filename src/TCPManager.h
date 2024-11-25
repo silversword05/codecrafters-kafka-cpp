@@ -17,6 +17,24 @@ struct Fd {
     int fd = -1;
 };
 
+struct RequestMessage {
+    uint32_t message_size{};
+    int16_t request_api_key{};
+    int16_t request_api_version{};
+    int32_t corellation_id{};
+
+    void fromBuffer(const char *buffer, size_t buffer_size);
+    std::string toString() const;
+};
+
+struct ResponseMessage {
+    uint32_t message_size{};
+    int32_t corellation_id{};
+
+    std::string_view toBuffer() const;
+    std::string toString() const;
+};
+
 struct TCPManager {
     TCPManager() = default;
 
@@ -30,8 +48,9 @@ struct TCPManager {
 
     void createSocketAndListen();
     Fd acceptConnections();
-    void writeBufferOnClientFd(const Fd &client_fd, std::string_view buffer,
-                               uint32_t corellation_id);
+    void writeBufferOnClientFd(const Fd &client_fd,
+                               const ResponseMessage &response_message);
+    RequestMessage readBufferFromClientFd(const Fd &client_fd);
 
   private:
     Fd server_fd;

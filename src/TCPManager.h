@@ -31,8 +31,7 @@ struct Header {
 };
 
 struct NullableString {
-    int16_t length = -1;
-    const char *value = nullptr;
+    std::string value = "";
 
     static NullableString fromBuffer(const char *buffer, size_t buffer_size);
     std::string_view toString() const;
@@ -45,6 +44,8 @@ struct TaggedFields {
 };
 
 struct RequestHeader : Header {
+    constexpr static uint32_t MIN_HEADER_SIZE = 14;
+
     int16_t request_api_key{};
     int16_t request_api_version{};
     int32_t corellation_id{};

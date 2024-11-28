@@ -22,36 +22,46 @@ Fd::~Fd() {
     }
 }
 
+void hexdump(const void *data, size_t size) {
+    const unsigned char *bytes = static_cast<const unsigned char *>(data);
+
+    for (size_t i = 0; i < size; ++i) {
+        std::cout << std::hex << std::setw(2) << std::setfill('0')
+                  << static_cast<int>(bytes[i]) << " ";
+
+        if ((i + 1) % 16 == 0) {
+            std::cout << std::endl;
+        }
+    }
+
+    std::cout << std::endl;
+}
+
 NullableString NullableString::fromBuffer(const char *buffer,
                                           size_t buffer_size) {
-    if (buffer_size < sizeof(NullableString::length)) [[unlikely]] {
+    if (buffer_size < sizeof(uint16_t)) [[unlikely]] {
         throw std::runtime_error("Buffer size is too small");
     }
 
     NullableString nullable_string;
-    nullable_string.length = ntohs(*reinterpret_cast<const int16_t *>(buffer));
-    if (nullable_string.length == -1) {
+    uint16_t length = ntohs(*reinterpret_cast<const uint16_t *>(buffer));
+
+    if (length == -1) {
         return nullable_string;
     }
 
-    nullable_string.value = buffer + sizeof(nullable_string.length);
+    nullable_string.value = std::string(buffer + sizeof(uint16_t), length);
     return nullable_string;
 }
 
-std::string_view NullableString::toString() const {
-    if (length == -1) {
-        return "";
-    } else {
-        return std::string(value, length);
-    }
-}
+std::string_view NullableString::toString() const { return value; }
 
 std::string TaggedFields::toString() const {
     return "TaggedFields{fieldCount=" + std::to_string(fieldCount) + "}";
 }
 
 void RequestHeader::fromBufferLocal(const char *buffer, size_t buffer_size) {
-    if (buffer_size < sizeof(RequestHeader)) {
+    if (buffer_size < RequestHeader::MIN_HEADER_SIZE) {
         throw std::runtime_error("Buffer size is too small");
     }
 
@@ -88,7 +98,7 @@ RequestHeader RequestHeader::fromBuffer(const char *buffer,
 
 ApiVersionsRequestMessage
 ApiVersionsRequestMessage::fromBuffer(const char *buffer, size_t buffer_size) {
-    if (buffer_size < sizeof(ApiVersionsRequestMessage)) {
+    if (buffer_size < ApiVersionsRequestMessage::MIN_HEADER_SIZE) {
         throw std::runtime_error("Buffer size is too small");
     }
 
@@ -122,7 +132,10 @@ std::string ApiVersionsResponseMessage::toBuffer() const {
     *reinterpret_cast<decltype(field) *>(                                      \
         buffer + offsetof(ApiVersionsResponseMessage, field)) = htons(field)
 
-    FILL_BUFFERL(message_size);
+    *reinterpret_cast<decltype(message_size) *>(
+        buffer + __builtin_offsetof(ApiVersionsResponseMessage, message_size)) =
+        htonl(message_size - sizeof(message_size));
+
     FILL_BUFFERL(corellation_id);
     FILL_BUFFERS(error_code);
 
@@ -221,7 +234,14 @@ void TCPManager::writeBufferOnClientFd(const Fd &client_fd,
     std::string buffer = response_message.toBuffer();
 
     // Write message Length
-    if (write(client_fd, buffer.data(), buffer.size()) != buffer.size()) {
+    if (send(client_fd, buffer.data(), sizeof(uint32_t), 0) !=
+        sizeof(uint32_t)) {
+        perror("send failed: ");
+        throw std::runtime_error("Failed to send msgLen to client: ");
+    }
+
+    if (send(client_fd, buffer.data() + 4, buffer.size() - 4, 0) !=
+        buffer.size() - 4) {
         perror("send failed: ");
         throw std::runtime_error("Failed to send msgLen to client: ");
     }
@@ -229,9 +249,9 @@ void TCPManager::writeBufferOnClientFd(const Fd &client_fd,
     std::cout << "Message sent to client: " << buffer.size() << " bytes\n";
 
     // Flush and close write side
-    // int optval = 1;
-    // setsockopt(client_fd, IPPROTO_TCP, TCP_NODELAY, &optval, sizeof(optval));
-    // shutdown(client_fd, SHUT_WR);
+    int optval = 1;
+    setsockopt(client_fd, IPPROTO_TCP, TCP_NODELAY, &optval, sizeof(optval));
+    shutdown(client_fd, SHUT_WR);
 
     // Hack to keep the program running for a while so that netcat can read the
     //  buffer
@@ -293,8 +313,8 @@ void KafkaApis::checkApiVersions(const char *buf, const size_t buf_size) const {
                   << request_message.request_api_version << "\n";
         api_versions_response_message.api_keys_count = 2;
         api_versions_response_message.api_key = API_VERSIONS_REQUEST;
-        api_versions_response_message.min_version = 2;
-        api_versions_response_message.max_version = 2;
+        api_versions_response_message.min_version = 3;
+        api_versions_response_message.max_version = 4;
     }
 
     tcp_manager.writeBufferOnClientFd(client_fd, api_versions_response_message);

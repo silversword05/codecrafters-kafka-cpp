@@ -21,10 +21,10 @@ int main(int argc, char *argv[]) {
         };
 
         signal(SIGINT, signal_handler);
+        Fd client_fd = tcp_manager.acceptConnections();
 
         while (true) {
             try {
-                Fd client_fd = tcp_manager.acceptConnections();
                 KafkaApis kafka_apis(client_fd, tcp_manager);
 
                 tcp_manager.readBufferFromClientFd(

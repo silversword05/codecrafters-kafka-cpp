@@ -248,15 +248,9 @@ void TCPManager::writeBufferOnClientFd(const Fd &client_fd,
 
     std::cout << "Message sent to client: " << buffer.size() << " bytes\n";
 
-    // Flush and close write side
+    // Just flush the write buffer
     int optval = 1;
     setsockopt(client_fd, IPPROTO_TCP, TCP_NODELAY, &optval, sizeof(optval));
-    shutdown(client_fd, SHUT_WR);
-
-    // Hack to keep the program running for a while so that netcat can read the
-    //  buffer
-    using namespace std::chrono_literals;
-    std::this_thread::sleep_for(1000ms);
 }
 
 void TCPManager::readBufferFromClientFd(
@@ -268,6 +262,11 @@ void TCPManager::readBufferFromClientFd(
     if (bytes_received < 0) {
         perror("recv failed: ");
         throw std::runtime_error("Failed to read from client: ");
+    }
+
+    if (bytes_received == 0) {
+        std::cout << "Client disconnected\n";
+        return;
     }
 
     std::cout << "Received " << bytes_received << " bytes from client\n";

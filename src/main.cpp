@@ -22,6 +22,14 @@ int main(int argc, char *argv[]) {
         client_fd, [&kafka_apis](const char *buf, const size_t buf_size) {
             kafka_apis.classifyRequest(buf, buf_size);
         });
+<<<<<<< HEAD
+=======
+
+    // Hack to keep the program running for a while so that netcat can read the
+    //  buffer
+    // using namespace std::chrono_literals;
+    // std::this_thread::sleep_for(1000ms);
+>>>>>>> 47b23b64f6b9715e2dd09b2b598ebf9562b7fa9d
 
     return 0;
 }

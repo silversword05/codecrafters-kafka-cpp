@@ -122,10 +122,34 @@ std::string ApiVersionsRequestMessage::toString() const {
     return "ApiVersionsRequestMessage{" + RequestHeader::toString() + "}";
 }
 
+#pragma GCC diagnostic ignored "-Winvalid-offsetof"
+
+std::string ApiVersionsResponseMessage::ApiKey::toBuffer() const {
+    char buffer[sizeof(ApiKey)]{};
+
+#define FILL_BUFFERS(field)                                                    \
+    *reinterpret_cast<decltype(field) *>(                                      \
+        buffer + offsetof(ApiVersionsResponseMessage::ApiKey, field)) =        \
+        htons(field)
+
+    FILL_BUFFERS(api_key);
+    FILL_BUFFERS(min_version);
+    FILL_BUFFERS(max_version);
+
+#undef FILL_BUFFERS
+
+    return std::string(buffer, sizeof(buffer));
+}
+
+std::string ApiVersionsResponseMessage::ApiKey::toString() const {
+    return "ApiKey{api_key=" + std::to_string(api_key) +
+           ", min_version=" + std::to_string(min_version) +
+           ", max_version=" + std::to_string(max_version) +
+           ", tagged_fields=" + tagged_fields.toString() + "}";
+}
+
 std::string ApiVersionsResponseMessage::toBuffer() const {
     char buffer[sizeof(ApiVersionsResponseMessage)]{};
-
-#pragma GCC diagnostic ignored "-Winvalid-offsetof"
 
 #define FILL_BUFFERL(field)                                                    \
     *reinterpret_cast<decltype(field) *>(                                      \
@@ -136,7 +160,7 @@ std::string ApiVersionsResponseMessage::toBuffer() const {
         buffer + offsetof(ApiVersionsResponseMessage, field)) = htons(field)
 
     *reinterpret_cast<decltype(message_size) *>(
-        buffer + __builtin_offsetof(ApiVersionsResponseMessage, message_size)) =
+        buffer + offsetof(ApiVersionsResponseMessage, message_size)) =
         htonl(message_size - sizeof(message_size));
 
     FILL_BUFFERL(corellation_id);
@@ -146,9 +170,13 @@ std::string ApiVersionsResponseMessage::toBuffer() const {
         buffer + offsetof(ApiVersionsResponseMessage, api_keys_count)) =
         api_keys_count;
 
-    FILL_BUFFERS(api_key);
-    FILL_BUFFERS(min_version);
-    FILL_BUFFERS(max_version);
+    std::string api_key1_buffer = api_key1.toBuffer();
+    std::copy(api_key1_buffer.begin(), api_key1_buffer.end(),
+              buffer + offsetof(ApiVersionsResponseMessage, api_key1));
+
+    std::string api_key2_buffer = api_key2.toBuffer();
+    std::copy(api_key2_buffer.begin(), api_key2_buffer.end(),
+              buffer + offsetof(ApiVersionsResponseMessage, api_key2));
 
 #undef FILL_BUFFERL
 #undef FILL_BUFFERS
@@ -163,13 +191,11 @@ std::string ApiVersionsResponseMessage::toString() const {
            std::to_string(message_size) +
            ", corellation_id=" + std::to_string(corellation_id) +
            ", error_code=" + std::to_string(error_code) +
-           ", api_key=" + std::to_string(api_key) +
            ", api_keys_count=" + std::to_string(api_keys_count) +
-           ", min_version=" + std::to_string(min_version) +
-           ", max_version=" + std::to_string(max_version) +
+           ", api_key1=" + api_key1.toString() +
+           ", api_key2=" + api_key2.toString() +
            ", throttle_time=" + std::to_string(throttle_time) +
-           ", tagged_fields=" + tagged_fields.toString() +
-           ", tagged_fields2=" + tagged_fields2.toString() + "}";
+           ", tagged_fields=" + tagged_fields.toString() + "}";
 }
 
 void TCPManager::createSocketAndListen() {
@@ -314,10 +340,16 @@ void KafkaApis::checkApiVersions(const char *buf, const size_t buf_size) const {
     } else {
         std::cout << "Supported version: "
                   << request_message.request_api_version << "\n";
-        api_versions_response_message.api_keys_count = 2;
-        api_versions_response_message.api_key = API_VERSIONS_REQUEST;
-        api_versions_response_message.min_version = 3;
-        api_versions_response_message.max_version = 4;
+        api_versions_response_message.api_keys_count = 3;
+
+        api_versions_response_message.api_key1.api_key = API_VERSIONS_REQUEST;
+        api_versions_response_message.api_key1.min_version = 3;
+        api_versions_response_message.api_key1.max_version = 4;
+
+        api_versions_response_message.api_key2.api_key =
+            DESCRIBE_TOPIC_PARTITIONS_REQUEST;
+        api_versions_response_message.api_key2.min_version = 0;
+        api_versions_response_message.api_key2.max_version = 0;
     }
 
     tcp_manager.writeBufferOnClientFd(client_fd, api_versions_response_message);

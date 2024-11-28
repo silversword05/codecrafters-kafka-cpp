@@ -71,13 +71,22 @@ struct ResponseHeader : Header {
 struct ApiVersionsResponseMessage : ResponseHeader {
     int16_t error_code{};
     uint8_t api_keys_count{};
-    int16_t api_key{};
-    int16_t min_version{};
-    int16_t max_version{};
 
-    TaggedFields tagged_fields{};
+    struct ApiKey {
+        int16_t api_key{};
+        int16_t min_version{};
+        int16_t max_version{};
+        TaggedFields tagged_fields{};
+
+        std::string toBuffer() const;
+        std::string toString() const;
+    };
+
+    ApiKey api_key1{};
+    ApiKey api_key2{};
+
     int32_t throttle_time = 0;
-    TaggedFields tagged_fields2{};
+    TaggedFields tagged_fields{};
 
     std::string toBuffer() const;
     std::string toString() const;
@@ -121,6 +130,7 @@ struct KafkaApis {
 
     static constexpr uint32_t UNSUPPORTED_VERSION = 35;
     static constexpr uint16_t API_VERSIONS_REQUEST = 18;
+    static constexpr uint16_t DESCRIBE_TOPIC_PARTITIONS_REQUEST = 75;
 
     void classifyRequest(const char *buf, const size_t buf_size) const;
     void checkApiVersions(const char *buf, const size_t buf_size) const;

@@ -102,12 +102,17 @@ struct TCPManager {
     void writeBufferOnClientFd(const Fd &client_fd,
                                const auto &response_message) const;
 
-    void readBufferFromClientFd(
+    bool readBufferFromClientFd(
         const Fd &client_fd,
         const std::function<void(const char *, const size_t)> &func) const;
 
+    void addClientThread(std::jthread &&client_thread) {
+        client_threads.push_back(std::move(client_thread));
+    }
+
   private:
     Fd server_fd;
+    std::vector<std::jthread> client_threads;
 };
 
 struct KafkaApis {

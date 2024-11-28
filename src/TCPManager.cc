@@ -3,6 +3,23 @@
 #include <netinet/tcp.h>
 #include <unistd.h>
 
+namespace {
+void hexdump(const void *data, size_t size) {
+    const unsigned char *bytes = static_cast<const unsigned char *>(data);
+
+    for (size_t i = 0; i < size; ++i) {
+        std::cout << std::hex << std::setw(2) << std::setfill('0')
+                  << static_cast<int>(bytes[i]) << " ";
+
+        if ((i + 1) % 16 == 0) {
+            std::cout << std::endl;
+        }
+    }
+
+    std::cout << std::endl;
+}
+} // namespace
+
 Fd &Fd::operator=(Fd &&other) noexcept {
     if (this != &other) {
         if (fd >= 0)
@@ -18,23 +35,9 @@ Fd::~Fd() {
         std::cout << "Closing file descriptor " << fd << "\n";
         close(fd);
     } else {
-        std::cout << "File descriptor already closed" << fd << "\n ";
+        std::cout << "File descriptor already closed " << fd << "\n";
     }
-}
-
-void hexdump(const void *data, size_t size) {
-    const unsigned char *bytes = static_cast<const unsigned char *>(data);
-
-    for (size_t i = 0; i < size; ++i) {
-        std::cout << std::hex << std::setw(2) << std::setfill('0')
-                  << static_cast<int>(bytes[i]) << " ";
-
-        if ((i + 1) % 16 == 0) {
-            std::cout << std::endl;
-        }
-    }
-
-    std::cout << std::endl;
+    fd = -1;
 }
 
 NullableString NullableString::fromBuffer(const char *buffer,
@@ -253,7 +256,7 @@ void TCPManager::writeBufferOnClientFd(const Fd &client_fd,
     setsockopt(client_fd, IPPROTO_TCP, TCP_NODELAY, &optval, sizeof(optval));
 }
 
-void TCPManager::readBufferFromClientFd(
+bool TCPManager::readBufferFromClientFd(
     const Fd &client_fd,
     const std::function<void(const char *, const size_t)> &func) const {
     char buffer[MAX_BUFFER_SIZE];
@@ -266,11 +269,12 @@ void TCPManager::readBufferFromClientFd(
 
     if (bytes_received == 0) {
         std::cout << "Client disconnected\n";
-        return;
+        return false;
     }
 
     std::cout << "Received " << bytes_received << " bytes from client\n";
     func(buffer, bytes_received);
+    return true;
 }
 
 KafkaApis::KafkaApis(const Fd &_client_fd, const TCPManager &_tcp_manager)

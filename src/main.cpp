@@ -38,8 +38,8 @@ int main(int argc, char *argv[]) {
             tcp_manager.addClientThread(
                 std::jthread([_client_fd = Fd(std::move(client_fd)),
                               &tcp_manager](std::stop_token st) {
-                    std::cout << "Attaching a new client thread " << _client_fd
-                              << " \n";
+                    std::cout << "Attaching a new client thread. client-fd: "
+                              << _client_fd << " \n";
 
                     while (!st.stop_requested()) {
                         try {

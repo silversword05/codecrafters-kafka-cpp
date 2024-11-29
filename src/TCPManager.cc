@@ -18,6 +18,37 @@ void hexdump(const void *data, size_t size) {
 
     std::cout << std::endl;
 }
+
+template <std::integral T> std::string toBuffer(const T &t) {
+    std::string buffer;
+    buffer.resize(sizeof(T));
+
+    if constexpr (sizeof(T) == 1) {
+        *reinterpret_cast<T *>(buffer.data()) = t;
+    } else if constexpr (sizeof(T) == 2) {
+        *reinterpret_cast<T *>(buffer.data()) = htons(t);
+    } else if constexpr (sizeof(T) == 4) {
+        *reinterpret_cast<T *>(buffer.data()) = htonl(t);
+    } else {
+        static_assert(sizeof(T) == 1 || sizeof(T) == 2 || sizeof(T) == 4,
+                      "Unsupported size");
+    }
+
+    return buffer;
+}
+
+template <std::integral T> T fromBuffer(const char *buffer) {
+    if constexpr (sizeof(T) == 1) {
+        return *reinterpret_cast<const T *>(buffer);
+    } else if constexpr (sizeof(T) == 2) {
+        return ntohs(*reinterpret_cast<const T *>(buffer));
+    } else if constexpr (sizeof(T) == 4) {
+        return ntohl(*reinterpret_cast<const T *>(buffer));
+    } else {
+        static_assert(sizeof(T) == 1 || sizeof(T) == 2 || sizeof(T) == 4,
+                      "Unsupported size");
+    }
+}
 } // namespace
 
 Fd &Fd::operator=(Fd &&other) noexcept {
@@ -40,24 +71,59 @@ Fd::~Fd() {
     fd = -1;
 }
 
-NullableString NullableString::fromBuffer(const char *buffer,
-                                          size_t buffer_size) {
-    if (buffer_size < sizeof(uint16_t)) [[unlikely]] {
+template <size_t N>
+NullableString<N> NullableString<N>::fromBuffer(const char *buffer,
+                                                size_t buffer_size) {
+    if (buffer_size < LEN_SIZE) {
         throw std::runtime_error("Buffer size is too small");
     }
+    NullableString<N> nullable_string;
 
-    NullableString nullable_string;
-    uint16_t length = ntohs(*reinterpret_cast<const uint16_t *>(buffer));
+    lenT length = ::fromBuffer<lenT>(buffer);
+    if constexpr (N == 1) {
+        length -= 1; /* Topic Name size + 1 */
+    }
 
     if (length == -1) {
         return nullable_string;
     }
 
-    nullable_string.value = std::string(buffer + sizeof(uint16_t), length);
+    nullable_string.value = std::string(buffer + sizeof(lenT), length);
     return nullable_string;
 }
 
-std::string_view NullableString::toString() const { return value; }
+template <size_t N> size_t NullableString<N>::size() const {
+    return LEN_SIZE + value.size();
+}
+
+template <size_t N> std::string_view NullableString<N>::toString() const {
+    return value;
+}
+
+template <size_t N> std::string NullableString<N>::toBuffer() const {
+    std::string buffer;
+    if constexpr (N == 1) {
+        buffer.append(::toBuffer<uint8_t>(value.size() + 1));
+    } else {
+        buffer.append(::toBuffer<uint16_t>(value.size()));
+    }
+    buffer.append(value);
+    return buffer;
+}
+
+std::string TaggedFields::toBuffer() const {
+    std::string buffer;
+    buffer.append(::toBuffer(fieldCount));
+    return buffer;
+}
+
+void TaggedFields::fromBuffer(const char *buffer, size_t buffer_size) {
+    if (buffer_size < sizeof(fieldCount)) {
+        throw std::runtime_error("Buffer size is too small");
+    }
+
+    fieldCount = ::fromBuffer<uint8_t>(buffer);
+}
 
 std::string TaggedFields::toString() const {
     return "TaggedFields{fieldCount=" + std::to_string(fieldCount) + "}";
@@ -70,26 +136,25 @@ void RequestHeader::fromBufferLocal(const char *buffer, size_t buffer_size) {
 
 #pragma GCC diagnostic ignored "-Winvalid-offsetof"
 
-#define READL(field)                                                           \
-    field = ntohl(*reinterpret_cast<const decltype(RequestHeader::field) *>(   \
-        buffer + offsetof(RequestHeader, field)));
-#define READS(field)                                                           \
-    field = ntohs(*reinterpret_cast<const decltype(RequestHeader::field) *>(   \
-        buffer + offsetof(RequestHeader, field)));
+#define READ(field)                                                            \
+    field = ::fromBuffer<decltype(RequestHeader::field)>(                      \
+        buffer + offsetof(RequestHeader, field));
 
-    READL(message_size);
-    READS(request_api_key);
-    READS(request_api_version);
-    READL(corellation_id);
+    READ(message_size);
+    READ(request_api_key);
+    READ(request_api_version);
+    READ(corellation_id);
 
-    client_id = NullableString::fromBuffer(
+    client_id = NullableString<2>::fromBuffer(
         buffer + offsetof(RequestHeader, client_id),
         buffer_size - offsetof(RequestHeader, client_id));
 
-#undef READL
-#undef READS
+    tagged_fields.fromBuffer(buffer + offsetof(RequestHeader, client_id) +
+                                 client_id.value.size(),
+                             buffer_size - offsetof(RequestHeader, client_id) -
+                                 client_id.value.size());
 
-#pragma diagnostic(pop)
+#undef READ
 }
 
 RequestHeader RequestHeader::fromBuffer(const char *buffer,
@@ -97,6 +162,11 @@ RequestHeader RequestHeader::fromBuffer(const char *buffer,
     RequestHeader request_header;
     request_header.fromBufferLocal(buffer, buffer_size);
     return request_header;
+}
+
+size_t RequestHeader::requestHeaderSize() const {
+    return offsetof(RequestHeader, client_id) + client_id.size() +
+           sizeof(TaggedFields);
 }
 
 ApiVersionsRequestMessage
@@ -108,6 +178,95 @@ ApiVersionsRequestMessage::fromBuffer(const char *buffer, size_t buffer_size) {
     ApiVersionsRequestMessage api_versions_request_message;
     api_versions_request_message.fromBufferLocal(buffer, buffer_size);
     return api_versions_request_message;
+}
+
+void DescribeTopicPartitionsRequest::Topic::fromBufferLocal(
+    const char *buffer, size_t buffer_size) {
+    if (buffer_size < NullableString<1>::LEN_SIZE + sizeof(TaggedFields)) {
+        throw std::runtime_error("Buffer size is too small");
+    }
+
+    topic_name = NullableString<1>::fromBuffer(buffer, buffer_size);
+    tagged_fields.fromBuffer(buffer + topic_name.size(),
+                             buffer_size - topic_name.size());
+}
+
+DescribeTopicPartitionsRequest::Topic
+DescribeTopicPartitionsRequest::Topic::fromBuffer(const char *buffer,
+                                                  size_t buffer_size) {
+    Topic topic;
+    topic.fromBufferLocal(buffer, buffer_size);
+    return topic;
+}
+
+size_t DescribeTopicPartitionsRequest::Topic::size() const {
+    return topic_name.size() + sizeof(TaggedFields);
+}
+
+DescribeTopicPartitionsRequest
+DescribeTopicPartitionsRequest::fromBuffer(const char *buffer,
+                                           size_t buffer_size) {
+    if (buffer_size < DescribeTopicPartitionsRequest::MIN_HEADER_SIZE) {
+        throw std::runtime_error("Buffer size is too small");
+    }
+
+    auto bufCpy = buffer;
+
+    DescribeTopicPartitionsRequest describe_topic_partitions_request;
+    describe_topic_partitions_request.fromBufferLocal(buffer, buffer_size);
+    buffer = buffer + describe_topic_partitions_request.requestHeaderSize();
+    buffer_size =
+        buffer_size - describe_topic_partitions_request.requestHeaderSize();
+
+    describe_topic_partitions_request.array_length =
+        ::fromBuffer<uint8_t>(buffer);
+    buffer = buffer + sizeof(uint8_t);
+    buffer_size = buffer_size - sizeof(uint8_t);
+
+    for (size_t i = 0; i < describe_topic_partitions_request.array_length - 1;
+         ++i) {
+        DescribeTopicPartitionsRequest::Topic topic =
+            DescribeTopicPartitionsRequest::Topic::fromBuffer(buffer,
+                                                              buffer_size);
+        describe_topic_partitions_request.topics.push_back(topic);
+        buffer = buffer + topic.size();
+        buffer_size = buffer_size - topic.size();
+    }
+
+    describe_topic_partitions_request.responsePartitionLimit =
+        ::fromBuffer<uint32_t>(buffer);
+    buffer = buffer + sizeof(uint32_t);
+    buffer_size = buffer_size - sizeof(uint32_t);
+
+    describe_topic_partitions_request.cursor = ::fromBuffer<uint8_t>(buffer);
+    buffer = buffer + sizeof(uint8_t);
+    buffer_size = buffer_size - sizeof(uint8_t);
+
+    describe_topic_partitions_request.tagged_fields.fromBuffer(buffer,
+                                                               buffer_size);
+    return describe_topic_partitions_request;
+}
+
+#pragma diagnostic(pop)
+
+std::string DescribeTopicPartitionsRequest::Topic::toString() const {
+    return "Topic{topic_name=" + std::string(topic_name.toString()) +
+           ", tagged_fields=" + tagged_fields.toString() + "}";
+}
+
+std::string DescribeTopicPartitionsRequest::toString() const {
+    std::string topics_str = "Topics{";
+    for (const auto &topic : topics) {
+        topics_str += topic.toString() + ", ";
+    }
+    topics_str += "}";
+
+    return "DescribeTopicPartitionsRequest{" + RequestHeader::toString() +
+           ", array_length=" + std::to_string(array_length) +
+           ", topics=" + topics_str + ", responsePartitionLimit=" +
+           std::to_string(responsePartitionLimit) +
+           ", cursor=" + std::to_string(cursor) +
+           ", tagged_fields=" + tagged_fields.toString() + "}";
 }
 
 std::string RequestHeader::toString() const {
@@ -125,20 +284,14 @@ std::string ApiVersionsRequestMessage::toString() const {
 #pragma GCC diagnostic ignored "-Winvalid-offsetof"
 
 std::string ApiVersionsResponseMessage::ApiKey::toBuffer() const {
-    char buffer[sizeof(ApiKey)]{};
+    std::string buffer;
 
-#define FILL_BUFFERS(field)                                                    \
-    *reinterpret_cast<decltype(field) *>(                                      \
-        buffer + offsetof(ApiVersionsResponseMessage::ApiKey, field)) =        \
-        htons(field)
+    buffer.append(::toBuffer(api_key));
+    buffer.append(::toBuffer(min_version));
+    buffer.append(::toBuffer(max_version));
+    buffer.append(tagged_fields.toBuffer());
 
-    FILL_BUFFERS(api_key);
-    FILL_BUFFERS(min_version);
-    FILL_BUFFERS(max_version);
-
-#undef FILL_BUFFERS
-
-    return std::string(buffer, sizeof(buffer));
+    return buffer;
 }
 
 std::string ApiVersionsResponseMessage::ApiKey::toString() const {
@@ -149,42 +302,71 @@ std::string ApiVersionsResponseMessage::ApiKey::toString() const {
 }
 
 std::string ApiVersionsResponseMessage::toBuffer() const {
-    char buffer[sizeof(ApiVersionsResponseMessage)]{};
+    std::string buffer = "XXXX"; // These are 4 bytes for message_size
 
-#define FILL_BUFFERL(field)                                                    \
-    *reinterpret_cast<decltype(field) *>(                                      \
-        buffer + offsetof(ApiVersionsResponseMessage, field)) = htonl(field)
+    buffer.append(::toBuffer(corellation_id));
+    buffer.append(::toBuffer(error_code));
+    buffer.append(::toBuffer(api_keys_count));
 
-#define FILL_BUFFERS(field)                                                    \
-    *reinterpret_cast<decltype(field) *>(                                      \
-        buffer + offsetof(ApiVersionsResponseMessage, field)) = htons(field)
+    buffer.append(api_key1.toBuffer());
+    buffer.append(api_key2.toBuffer());
 
-    *reinterpret_cast<decltype(message_size) *>(
-        buffer + offsetof(ApiVersionsResponseMessage, message_size)) =
-        htonl(message_size - sizeof(message_size));
+    buffer.append(::toBuffer(throttle_time));
+    buffer.append(tagged_fields.toBuffer());
 
-    FILL_BUFFERL(corellation_id);
-    FILL_BUFFERS(error_code);
+    // Update the message size
+    *reinterpret_cast<uint32_t *>(buffer.data()) = htonl(buffer.size() - 4);
 
-    *reinterpret_cast<uint8_t *>(
-        buffer + offsetof(ApiVersionsResponseMessage, api_keys_count)) =
-        api_keys_count;
+    return buffer;
+}
 
-    std::string api_key1_buffer = api_key1.toBuffer();
-    std::copy(api_key1_buffer.begin(), api_key1_buffer.end(),
-              buffer + offsetof(ApiVersionsResponseMessage, api_key1));
+std::string DescribeTopicPartitionsResponse::Topic::toBuffer() const {
+    std::string buffer;
+    buffer.append(::toBuffer(error_code));
 
-    std::string api_key2_buffer = api_key2.toBuffer();
-    std::copy(api_key2_buffer.begin(), api_key2_buffer.end(),
-              buffer + offsetof(ApiVersionsResponseMessage, api_key2));
+    buffer.append(topic_name.toBuffer());
+    buffer.append(topic_id.data(), topic_id.size());
 
-#undef FILL_BUFFERL
-#undef FILL_BUFFERS
+    std::cout << "buffer size before bool internal: " << buffer.size()
+              << std::endl;
+
+    buffer.append(::toBuffer<uint8_t>((boolInternal) ? 1 : 0));
+    buffer.append(::toBuffer(array_length));
+
+    buffer.append(authorizedOperations.data(), authorizedOperations.size());
+    buffer.append(tagged_fields.toBuffer());
+
+    return buffer;
+}
+
+size_t DescribeTopicPartitionsResponse::Topic::size() const {
+    return sizeof(error_code) + topic_name.size() + topic_id.size() +
+           sizeof(boolInternal) + sizeof(array_length) +
+           authorizedOperations.size() + sizeof(tagged_field.fieldCount);
+}
+
+std::string DescribeTopicPartitionsResponse::toBuffer() const {
+    std::string buffer = "XXXX"; // These are 4 bytes for message_size
+
+    buffer.append(::toBuffer(corellation_id));
+    buffer.append(tagged_fields.toBuffer());
+    buffer.append(::toBuffer(throttle_time));
+    buffer.append(::toBuffer(array_length));
+
+    for (const auto &topic : topics) {
+        buffer.append(topic.toBuffer());
+    }
+
+    buffer.append(::toBuffer(cursor));
+    buffer.append(tagged_field.toBuffer());
+
+    // Update the message size
+    *reinterpret_cast<uint32_t *>(buffer.data()) = htonl(buffer.size() - 4);
+
+    return buffer;
+}
 
 #pragma diagnostic(pop)
-
-    return std::string(buffer, sizeof(buffer));
-}
 
 std::string ApiVersionsResponseMessage::toString() const {
     return "ApiVersionsResponseMessage{message_size=" +
@@ -196,6 +378,31 @@ std::string ApiVersionsResponseMessage::toString() const {
            ", api_key2=" + api_key2.toString() +
            ", throttle_time=" + std::to_string(throttle_time) +
            ", tagged_fields=" + tagged_fields.toString() + "}";
+}
+
+std::string DescribeTopicPartitionsResponse::Topic::toString() const {
+    return "Topic{error_code=" + std::to_string(error_code) +
+           ", topic_name=" + std::string(topic_name.toString()) +
+           ", boolInternal=" + std::to_string(boolInternal) +
+           ", array_length=" + std::to_string(array_length) +
+           ", tagged_fields=" + tagged_fields.toString() + "}";
+}
+
+std::string DescribeTopicPartitionsResponse::toString() const {
+    std::string topics_str = "Topics{";
+    for (const auto &topic : topics) {
+        topics_str += topic.toString() + ", ";
+    }
+    topics_str += "}";
+
+    return "DescribeTopicPartitionsResponse{message_size=" +
+           std::to_string(message_size) +
+           ", corellation_id=" + std::to_string(corellation_id) +
+           ", tagged_fields=" + tagged_fields.toString() +
+           ", throttle_time=" + std::to_string(throttle_time) +
+           ", array_length=" + std::to_string(array_length) +
+           ", topics=" + topics_str + ", cursor=" + std::to_string(cursor) +
+           ", tagged_fields=" + tagged_field.toString() + "}";
 }
 
 void TCPManager::createSocketAndListen() {
@@ -309,9 +516,14 @@ KafkaApis::KafkaApis(const Fd &_client_fd, const TCPManager &_tcp_manager)
 void KafkaApis::classifyRequest(const char *buf, const size_t buf_size) const {
     RequestHeader request_header = RequestHeader::fromBuffer(buf, buf_size);
 
+    std::cout << "Received Request: " << request_header.toString() << "\n";
+
     switch (request_header.request_api_key) {
     case API_VERSIONS_REQUEST:
         checkApiVersions(buf, buf_size);
+        break;
+    case DESCRIBE_TOPIC_PARTITIONS_REQUEST:
+        describeTopicPartitions(buf, buf_size);
         break;
     default:
         std::cout << "Unsupported API key: " << request_header.request_api_key
@@ -327,8 +539,6 @@ void KafkaApis::checkApiVersions(const char *buf, const size_t buf_size) const {
               << "\n";
 
     ApiVersionsResponseMessage api_versions_response_message;
-    api_versions_response_message.message_size =
-        sizeof(ApiVersionsResponseMessage);
     api_versions_response_message.corellation_id =
         request_message.corellation_id;
 
@@ -353,4 +563,38 @@ void KafkaApis::checkApiVersions(const char *buf, const size_t buf_size) const {
     }
 
     tcp_manager.writeBufferOnClientFd(client_fd, api_versions_response_message);
+}
+
+void KafkaApis::describeTopicPartitions(const char *buf,
+                                        const size_t buf_size) const {
+    DescribeTopicPartitionsRequest request_message =
+        DescribeTopicPartitionsRequest::fromBuffer(buf, buf_size);
+
+    std::cout << "Received Describe Topic Partitions Request: "
+              << request_message.toString() << "\n";
+
+    DescribeTopicPartitionsResponse describe_topic_partitions_response;
+
+    describe_topic_partitions_response.corellation_id =
+        request_message.corellation_id;
+    describe_topic_partitions_response.array_length =
+        request_message.topics.size() + 1;
+
+    for (const auto &topic : request_message.topics) {
+        DescribeTopicPartitionsResponse::Topic topic1;
+        topic1.error_code = UNKNOWN_TOPIC_OR_PARTITION;
+        topic1.topic_name = topic.topic_name;
+        topic1.array_length = 1; // Empty partitions array
+        topic1.authorizedOperations = {0, 0, 0x0d, char(0xf8)};
+        topic1.tagged_fields = topic.tagged_fields;
+
+        describe_topic_partitions_response.topics.push_back(topic1);
+    }
+
+    describe_topic_partitions_response.cursor = request_message.cursor;
+    describe_topic_partitions_response.tagged_field =
+        request_message.tagged_fields;
+
+    tcp_manager.writeBufferOnClientFd(client_fd,
+                                      describe_topic_partitions_response);
 }

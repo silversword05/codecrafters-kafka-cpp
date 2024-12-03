@@ -7,6 +7,16 @@
 #include <sys/types.h>
 
 #pragma pack(push, 1)
+
+struct VariableInt {
+    int32_t value = 0;
+    size_t int_size = 0;
+
+    void fromBuffer(const char *buffer);
+    size_t size() const { return int_size; }
+    operator int() const { return value; }
+};
+
 struct Header {
     uint32_t message_size{};
 };
@@ -116,7 +126,7 @@ struct DescribeTopicPartitionsResponse : ResponseHeader {
     struct Topic {
         int16_t error_code{};
         NullableString<1> topic_name{};
-        std::array<char, 16> topic_id{};
+        std::array<char, 16> topic_uuid{};
         bool boolInternal;
         uint8_t array_length{}; // The length of the topics array + 1
         std::array<char, 4> authorizedOperations{};
@@ -136,3 +146,64 @@ struct DescribeTopicPartitionsResponse : ResponseHeader {
 };
 
 #pragma pack(pop)
+
+void hexdump(const void *data, size_t size);
+
+#pragma GCC diagnostic ignored "-Winvalid-offsetof"
+
+#if __BIG_ENDIAN__
+#define htonll(x) (x)
+#define ntohll(x) (x)
+#else
+#define htonll(x) ((((uint64_t)htonl(x & 0xFFFFFFFF)) << 32) + htonl(x >> 32))
+#define ntohll(x) ((((uint64_t)ntohl(x & 0xFFFFFFFF)) << 32) + ntohl(x >> 32))
+#endif
+
+template <std::integral T> std::string toBuffer(const T &t) {
+    std::string buffer;
+    buffer.resize(sizeof(T));
+
+    if constexpr (sizeof(T) == 1) {
+        *reinterpret_cast<T *>(buffer.data()) = t;
+    } else if constexpr (sizeof(T) == 2) {
+        *reinterpret_cast<T *>(buffer.data()) = htons(t);
+    } else if constexpr (sizeof(T) == 4) {
+        *reinterpret_cast<T *>(buffer.data()) = htonl(t);
+    } else if constexpr (sizeof(T) == 8) {
+        *reinterpret_cast<T *>(buffer.data()) = htonll(t);
+    } else {
+        static_assert(sizeof(T) == 1 || sizeof(T) == 2 || sizeof(T) == 4 ||
+                          sizeof(T) == 8,
+                      "Unsupported size");
+    }
+
+    return buffer;
+}
+
+template <std::integral T> T fromBuffer(const char *buffer) {
+    if constexpr (sizeof(T) == 1) {
+        return *reinterpret_cast<const T *>(buffer);
+    } else if constexpr (sizeof(T) == 2) {
+        return ntohs(*reinterpret_cast<const T *>(buffer));
+    } else if constexpr (sizeof(T) == 4) {
+        return ntohl(*reinterpret_cast<const T *>(buffer));
+    } else if constexpr (sizeof(T) == 8) {
+        return ntohll(*reinterpret_cast<const T *>(buffer));
+    } else {
+        static_assert(sizeof(T) == 1 || sizeof(T) == 2 || sizeof(T) == 4 ||
+                          sizeof(T) == 8,
+                      "Unsupported size");
+    }
+}
+
+template <size_t N> std::string charArrToHex(std::array<char, N> arr) {
+#define HEX(x) std::setw(2) << std::setfill('0') << std::hex << (int)(x)
+    std::stringstream ss;
+    for (char c : arr)
+        ss << HEX(c) << " ";
+    std::string str = ss.str();
+    return str;
+#undef HEX
+}
+
+#pragma diagnostic(pop)

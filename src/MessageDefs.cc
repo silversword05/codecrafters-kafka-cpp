@@ -2,8 +2,21 @@
 
 #pragma GCC diagnostic ignored "-Winvalid-offsetof"
 
-namespace {
+class IosFlagSaver {
+  public:
+    explicit IosFlagSaver(std::ostream &_ios) : ios(_ios), f(_ios.flags()) {}
+    ~IosFlagSaver() { ios.flags(f); }
+
+    IosFlagSaver(const IosFlagSaver &rhs) = delete;
+    IosFlagSaver &operator=(const IosFlagSaver &rhs) = delete;
+
+  private:
+    std::ostream &ios;
+    std::ios::fmtflags f;
+};
+
 void hexdump(const void *data, size_t size) {
+    IosFlagSaver iosfs(std::cout);
     const unsigned char *bytes = static_cast<const unsigned char *>(data);
 
     for (size_t i = 0; i < size; ++i) {
@@ -18,37 +31,24 @@ void hexdump(const void *data, size_t size) {
     std::cout << std::endl;
 }
 
-template <std::integral T> std::string toBuffer(const T &t) {
-    std::string buffer;
-    buffer.resize(sizeof(T));
+auto zigzagDecode(auto x) { return (x >> 1) ^ (-(x & 1)); }
 
-    if constexpr (sizeof(T) == 1) {
-        *reinterpret_cast<T *>(buffer.data()) = t;
-    } else if constexpr (sizeof(T) == 2) {
-        *reinterpret_cast<T *>(buffer.data()) = htons(t);
-    } else if constexpr (sizeof(T) == 4) {
-        *reinterpret_cast<T *>(buffer.data()) = htonl(t);
-    } else {
-        static_assert(sizeof(T) == 1 || sizeof(T) == 2 || sizeof(T) == 4,
-                      "Unsupported size");
+void VariableInt::fromBuffer(const char *buffer) {
+    int shift = 0;
+
+    while (true) {
+        uint8_t byte = *buffer;
+        buffer++;
+        int_size++;
+        value |= (int32_t)(byte & 0x7F) << shift;
+        if ((byte & 0x80) == 0) {
+            break;
+        }
+        shift += 7;
     }
 
-    return buffer;
+    value = zigzagDecode(value);
 }
-
-template <std::integral T> T fromBuffer(const char *buffer) {
-    if constexpr (sizeof(T) == 1) {
-        return *reinterpret_cast<const T *>(buffer);
-    } else if constexpr (sizeof(T) == 2) {
-        return ntohs(*reinterpret_cast<const T *>(buffer));
-    } else if constexpr (sizeof(T) == 4) {
-        return ntohl(*reinterpret_cast<const T *>(buffer));
-    } else {
-        static_assert(sizeof(T) == 1 || sizeof(T) == 2 || sizeof(T) == 4,
-                      "Unsupported size");
-    }
-}
-} // namespace
 
 template <size_t N>
 NullableString<N> NullableString<N>::fromBuffer(const char *buffer,
@@ -82,9 +82,9 @@ template <size_t N> std::string_view NullableString<N>::toString() const {
 template <size_t N> std::string NullableString<N>::toBuffer() const {
     std::string buffer;
     if constexpr (N == 1) {
-        buffer.append(::toBuffer<uint8_t>(value.size() + 1));
+        buffer.append(::toBuffer<lenT>(value.size() + 1));
     } else {
-        buffer.append(::toBuffer<uint16_t>(value.size()));
+        buffer.append(::toBuffer<lenT>(value.size()));
     }
     buffer.append(value);
     return buffer;
@@ -298,10 +298,7 @@ std::string DescribeTopicPartitionsResponse::Topic::toBuffer() const {
     buffer.append(::toBuffer(error_code));
 
     buffer.append(topic_name.toBuffer());
-    buffer.append(topic_id.data(), topic_id.size());
-
-    std::cout << "buffer size before bool internal: " << buffer.size()
-              << std::endl;
+    buffer.append(topic_uuid.data(), topic_uuid.size());
 
     buffer.append(::toBuffer<uint8_t>((boolInternal) ? 1 : 0));
     buffer.append(::toBuffer(array_length));
@@ -313,7 +310,7 @@ std::string DescribeTopicPartitionsResponse::Topic::toBuffer() const {
 }
 
 size_t DescribeTopicPartitionsResponse::Topic::size() const {
-    return sizeof(error_code) + topic_name.size() + topic_id.size() +
+    return sizeof(error_code) + topic_name.size() + topic_uuid.size() +
            sizeof(boolInternal) + sizeof(array_length) +
            authorizedOperations.size() + sizeof(tagged_field.fieldCount);
 }
@@ -354,8 +351,10 @@ std::string ApiVersionsResponseMessage::toString() const {
 std::string DescribeTopicPartitionsResponse::Topic::toString() const {
     return "Topic{error_code=" + std::to_string(error_code) +
            ", topic_name=" + std::string(topic_name.toString()) +
+           ", topic_id=" + charArrToHex(topic_uuid) +
            ", boolInternal=" + std::to_string(boolInternal) +
            ", array_length=" + std::to_string(array_length) +
+           ", authorizedOperations=" + charArrToHex(authorizedOperations) +
            ", tagged_fields=" + tagged_fields.toString() + "}";
 }
 
@@ -377,3 +376,6 @@ std::string DescribeTopicPartitionsResponse::toString() const {
 }
 
 #pragma diagnostic(pop)
+
+template struct NullableString<1>;
+template struct NullableString<2>;

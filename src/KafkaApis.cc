@@ -419,16 +419,30 @@ void KafkaApis::checkApiVersions(const char *buf, const size_t buf_size) const {
     } else {
         std::cout << "Supported version: "
                   << request_message.request_api_version << "\n";
-        api_versions_response_message.api_keys_count = 3;
 
-        api_versions_response_message.api_key1.api_key = API_VERSIONS_REQUEST;
-        api_versions_response_message.api_key1.min_version = 3;
-        api_versions_response_message.api_key1.max_version = 4;
+        {
+            ApiVersionsResponseMessage::ApiKey api_key;
+            api_key.api_key = API_VERSIONS_REQUEST;
+            api_key.min_version = 3;
+            api_key.max_version = 4;
+            api_versions_response_message.api_keys.push_back(api_key);
+        }
 
-        api_versions_response_message.api_key2.api_key =
-            DESCRIBE_TOPIC_PARTITIONS_REQUEST;
-        api_versions_response_message.api_key2.min_version = 0;
-        api_versions_response_message.api_key2.max_version = 0;
+        {
+            ApiVersionsResponseMessage::ApiKey api_key;
+            api_key.api_key = DESCRIBE_TOPIC_PARTITIONS_REQUEST;
+            api_key.min_version = 0;
+            api_key.max_version = 0;
+            api_versions_response_message.api_keys.push_back(api_key);
+        }
+
+        {
+            ApiVersionsResponseMessage::ApiKey api_key;
+            api_key.api_key = FETCH_REQUEST;
+            api_key.min_version = 0;
+            api_key.max_version = 16;
+            api_versions_response_message.api_keys.push_back(api_key);
+        }
     }
 
     tcp_manager.writeBufferOnClientFd(client_fd, api_versions_response_message);

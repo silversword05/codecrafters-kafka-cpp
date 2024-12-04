@@ -79,8 +79,6 @@ struct ApiVersionsRequestMessage : RequestHeader {
 };
 
 struct DescribeTopicPartitionsRequest : RequestHeader {
-    uint8_t array_length{}; // The length of the topics array + 1
-
     struct Topic {
         NullableString<1> topic_name{};
         TaggedFields tagged_fields{};
@@ -109,7 +107,6 @@ struct ResponseHeader : Header {
 
 struct ApiVersionsResponseMessage : ResponseHeader {
     int16_t error_code{};
-    uint8_t api_keys_count{};
 
     struct ApiKey {
         int16_t api_key{};
@@ -121,8 +118,7 @@ struct ApiVersionsResponseMessage : ResponseHeader {
         std::string toString() const;
     };
 
-    ApiKey api_key1{};
-    ApiKey api_key2{};
+    std::vector<ApiKey> api_keys{};
 
     int32_t throttle_time = 0;
     TaggedFields tagged_fields{};

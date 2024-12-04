@@ -251,13 +251,11 @@ DescribeTopicPartitionsRequest::fromBuffer(const char *buffer,
     buffer_size =
         buffer_size - describe_topic_partitions_request.requestHeaderSize();
 
-    describe_topic_partitions_request.array_length =
-        ::fromBuffer<uint8_t>(buffer);
+    uint8_t array_length = ::fromBuffer<uint8_t>(buffer);
     buffer = buffer + sizeof(uint8_t);
     buffer_size = buffer_size - sizeof(uint8_t);
 
-    for (size_t i = 0; i < describe_topic_partitions_request.array_length - 1;
-         ++i) {
+    for (size_t i = 0; i < array_length - 1; ++i) {
         DescribeTopicPartitionsRequest::Topic topic =
             DescribeTopicPartitionsRequest::Topic::fromBuffer(buffer,
                                                               buffer_size);
@@ -293,7 +291,7 @@ std::string DescribeTopicPartitionsRequest::toString() const {
     topics_str += "}";
 
     return "DescribeTopicPartitionsRequest{" + RequestHeader::toString() +
-           ", array_length=" + std::to_string(array_length) +
+           ", array_length=" + std::to_string(topics.size() + 1) +
            ", topics=" + topics_str + ", responsePartitionLimit=" +
            std::to_string(responsePartitionLimit) +
            ", cursor=" + std::to_string(cursor) +
@@ -335,10 +333,11 @@ std::string ApiVersionsResponseMessage::toBuffer() const {
 
     buffer.append(::toBuffer(corellation_id));
     buffer.append(::toBuffer(error_code));
-    buffer.append(::toBuffer(api_keys_count));
+    buffer.append(::toBuffer<uint8_t>(api_keys.size() + 1));
 
-    buffer.append(api_key1.toBuffer());
-    buffer.append(api_key2.toBuffer());
+    for (const auto &api_key : api_keys) {
+        buffer.append(api_key.toBuffer());
+    }
 
     buffer.append(::toBuffer(throttle_time));
     buffer.append(tagged_fields.toBuffer());
@@ -409,13 +408,18 @@ std::string DescribeTopicPartitionsResponse::toBuffer() const {
 }
 
 std::string ApiVersionsResponseMessage::toString() const {
+    std::string api_keys_str = "ApiKeys{";
+    for (const auto &api_key : api_keys) {
+        api_keys_str += api_key.toString() + ", ";
+    }
+    api_keys_str += "}";
+
     return "ApiVersionsResponseMessage{message_size=" +
            std::to_string(message_size) +
            ", corellation_id=" + std::to_string(corellation_id) +
            ", error_code=" + std::to_string(error_code) +
-           ", api_keys_count=" + std::to_string(api_keys_count) +
-           ", api_key1=" + api_key1.toString() +
-           ", api_key2=" + api_key2.toString() +
+           ", api_keys_count=" + std::to_string(api_keys.size() + 1) +
+           ", api_keys=" + api_keys_str +
            ", throttle_time=" + std::to_string(throttle_time) +
            ", tagged_fields=" + tagged_fields.toString() + "}";
 }

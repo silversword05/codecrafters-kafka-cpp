@@ -127,6 +127,7 @@ struct KafkaApis {
 
     static constexpr uint16_t API_VERSIONS_REQUEST = 18;
     static constexpr uint16_t DESCRIBE_TOPIC_PARTITIONS_REQUEST = 75;
+    static constexpr uint16_t FETCH_REQUEST = 1;
 
     void classifyRequest(const char *buf, const size_t buf_size) const;
     void checkApiVersions(const char *buf, const size_t buf_size) const;

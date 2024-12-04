@@ -31,6 +31,62 @@ void hexdump(const void *data, size_t size) {
     std::cout << std::endl;
 }
 
+template <CompactArrayT T> consteval size_t CompactArray<T>::unitSize() {
+    if constexpr (std::is_integral_v<T>) {
+        return sizeof(T);
+    } else {
+        static_assert(std::same_as<T, std::array<char, 16>>,
+                      "Unsupported type");
+        return std::size(T());
+    }
+}
+
+template <CompactArrayT T> size_t CompactArray<T>::size() const {
+    return sizeof(uint8_t) + CompactArray<T>::unitSize() * values.size();
+}
+
+template <CompactArrayT T>
+void CompactArray<T>::fromBuffer(const char *buffer, size_t buffer_size) {
+    if (buffer_size < sizeof(uint8_t)) {
+        throw std::runtime_error("Buffer size is too small");
+    }
+
+    uint8_t array_length = ::fromBuffer<uint8_t>(buffer);
+    buffer += sizeof(uint8_t);
+    buffer_size -= sizeof(uint8_t);
+
+    for (uint8_t i = 0; i < array_length - 1; ++i) {
+        if constexpr (std::is_integral_v<T>) {
+            values.push_back(::fromBuffer<T>(buffer));
+        } else {
+            static_assert(std::same_as<T, std::array<char, 16>>,
+                          "Unsupported type");
+            T value;
+            std::copy_n(buffer, value.size(), value.begin());
+            values.push_back(value);
+        }
+
+        buffer += unitSize();
+        buffer_size -= unitSize();
+    }
+}
+
+template <CompactArrayT T> std::string CompactArray<T>::toBuffer() const {
+    std::string buffer;
+    buffer.append(::toBuffer<uint8_t>(values.size() + 1));
+
+    for (const auto &value : values) {
+        if constexpr (std::is_integral_v<T>) {
+            buffer.append(::toBuffer(value));
+        } else {
+            static_assert(std::same_as<T, std::array<char, 16>>,
+                          "Unsupported type");
+            buffer.append(value.data(), value.size());
+        }
+    }
+    return buffer;
+}
+
 auto zigzagDecode(auto x) { return (x >> 1) ^ (-(x & 1)); }
 
 void VariableInt::fromBuffer(const char *buffer) {
@@ -293,6 +349,24 @@ std::string ApiVersionsResponseMessage::toBuffer() const {
     return buffer;
 }
 
+std::string DescribeTopicPartitionsResponse::Partition::toBuffer() const {
+    std::string buffer;
+
+    buffer.append(::toBuffer(error_code));
+    buffer.append(::toBuffer(partition_id));
+    buffer.append(::toBuffer(leader_id));
+    buffer.append(::toBuffer(leader_epoch));
+
+    buffer.append(replica_array.toBuffer());
+    buffer.append(in_sync_replica_array.toBuffer());
+    buffer.append(eligible_leader_replica_array.toBuffer());
+    buffer.append(last_known_elr_array.toBuffer());
+    buffer.append(offline_replica_array.toBuffer());
+
+    buffer.append(tagged_fields.toBuffer());
+    return buffer;
+}
+
 std::string DescribeTopicPartitionsResponse::Topic::toBuffer() const {
     std::string buffer;
     buffer.append(::toBuffer(error_code));
@@ -301,18 +375,16 @@ std::string DescribeTopicPartitionsResponse::Topic::toBuffer() const {
     buffer.append(topic_uuid.data(), topic_uuid.size());
 
     buffer.append(::toBuffer<uint8_t>((boolInternal) ? 1 : 0));
-    buffer.append(::toBuffer(array_length));
+    buffer.append(::toBuffer<uint8_t>(partitions.size() + 1));
+
+    for (const auto &partition : partitions) {
+        buffer.append(partition.toBuffer());
+    }
 
     buffer.append(authorizedOperations.data(), authorizedOperations.size());
     buffer.append(tagged_fields.toBuffer());
 
     return buffer;
-}
-
-size_t DescribeTopicPartitionsResponse::Topic::size() const {
-    return sizeof(error_code) + topic_name.size() + topic_uuid.size() +
-           sizeof(boolInternal) + sizeof(array_length) +
-           authorizedOperations.size() + sizeof(tagged_field.fieldCount);
 }
 
 std::string DescribeTopicPartitionsResponse::toBuffer() const {
@@ -321,7 +393,7 @@ std::string DescribeTopicPartitionsResponse::toBuffer() const {
     buffer.append(::toBuffer(corellation_id));
     buffer.append(tagged_fields.toBuffer());
     buffer.append(::toBuffer(throttle_time));
-    buffer.append(::toBuffer(array_length));
+    buffer.append(::toBuffer<uint8_t>(topics.size() + 1));
 
     for (const auto &topic : topics) {
         buffer.append(topic.toBuffer());
@@ -348,12 +420,33 @@ std::string ApiVersionsResponseMessage::toString() const {
            ", tagged_fields=" + tagged_fields.toString() + "}";
 }
 
+std::string DescribeTopicPartitionsResponse::Partition::toString() const {
+    return "Partition{error_code=" + std::to_string(error_code) +
+           ", partition_id=" + std::to_string(partition_id) +
+           ", leader_id=" + std::to_string(leader_id) +
+           ", leader_epoch=" + std::to_string(leader_epoch) +
+           ", replica_array=" + replica_array.toString() +
+           ", in_sync_replica_array=" + in_sync_replica_array.toString() +
+           ", eligible_leader_replica_array=" +
+           eligible_leader_replica_array.toString() +
+           ", last_known_elr_array=" + last_known_elr_array.toString() +
+           ", offline_replica_array=" + offline_replica_array.toString() +
+           ", tagged_fields=" + tagged_fields.toString() + "}";
+}
+
 std::string DescribeTopicPartitionsResponse::Topic::toString() const {
+    std::string partitions_str = "Partitions{";
+    for (const auto &partition : partitions) {
+        partitions_str += partition.toString() + ", ";
+    }
+    partitions_str += "}";
+
     return "Topic{error_code=" + std::to_string(error_code) +
            ", topic_name=" + std::string(topic_name.toString()) +
            ", topic_id=" + charArrToHex(topic_uuid) +
            ", boolInternal=" + std::to_string(boolInternal) +
-           ", array_length=" + std::to_string(array_length) +
+           ", array_length=" + std::to_string(partitions.size() + 1) +
+           ", partitions=" + partitions_str +
            ", authorizedOperations=" + charArrToHex(authorizedOperations) +
            ", tagged_fields=" + tagged_fields.toString() + "}";
 }
@@ -370,7 +463,7 @@ std::string DescribeTopicPartitionsResponse::toString() const {
            ", corellation_id=" + std::to_string(corellation_id) +
            ", tagged_fields=" + tagged_fields.toString() +
            ", throttle_time=" + std::to_string(throttle_time) +
-           ", array_length=" + std::to_string(array_length) +
+           ", array_length=" + std::to_string(topics.size() + 1) +
            ", topics=" + topics_str + ", cursor=" + std::to_string(cursor) +
            ", tagged_fields=" + tagged_field.toString() + "}";
 }
@@ -379,3 +472,5 @@ std::string DescribeTopicPartitionsResponse::toString() const {
 
 template struct NullableString<1>;
 template struct NullableString<2>;
+template struct CompactArray<uint32_t>;
+template struct CompactArray<std::array<char, 16>>;

@@ -22,6 +22,7 @@ int main(int argc, char *argv[]) {
 
     TCPManager tcp_manager;
     tcp_manager.createSocketAndListen();
+    ClusterMetadata cluster_metadata;
 
     shutdown_handler = [&tcp_manager](int signal) {
         std::cout << "Caught signal " << signal << '\n';
@@ -29,20 +30,16 @@ int main(int argc, char *argv[]) {
         exit(1);
     };
 
-    Fd fd;
-    KafkaApis kafka_apis(fd, tcp_manager);
-    exit(0);
-
     signal(SIGINT, signal_handler);
 
     while (true) {
         Fd client_fd = tcp_manager.acceptConnections();
         tcp_manager.addClientThread(
-            std::jthread([_client_fd = std::move(client_fd),
-                          &tcp_manager](std::stop_token st) {
+            std::jthread([_client_fd = std::move(client_fd), &tcp_manager,
+                          &cluster_metadata](std::stop_token st) {
                 std::cout << "Attaching a new client thread. client-fd: "
                           << _client_fd << " \n";
-                KafkaApis kafka_apis(_client_fd, tcp_manager);
+                KafkaApis kafka_apis(_client_fd, tcp_manager, cluster_metadata);
 
                 while (!st.stop_requested()) {
                     bool done =

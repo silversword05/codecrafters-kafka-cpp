@@ -1,45 +1,5 @@
 #include "KafkaApis.h"
 
-template <CompactArrayT T> consteval size_t CompactArray<T>::unitSize() {
-    if constexpr (std::is_integral_v<T>) {
-        return sizeof(T);
-    } else {
-        static_assert(std::same_as<T, std::array<char, 16>>,
-                      "Unsupported type");
-        return std::size(T());
-    }
-}
-
-template <CompactArrayT T> size_t CompactArray<T>::size() const {
-    return sizeof(uint8_t) + CompactArray<T>::unitSize() * values.size();
-}
-
-template <CompactArrayT T>
-void CompactArray<T>::fromBuffer(const char *buffer, size_t buffer_size) {
-    if (buffer_size < sizeof(uint8_t)) {
-        throw std::runtime_error("Buffer size is too small");
-    }
-
-    uint8_t array_length = ::fromBuffer<uint8_t>(buffer);
-    buffer += sizeof(uint8_t);
-    buffer_size -= sizeof(uint8_t);
-
-    for (uint8_t i = 0; i < array_length - 1; ++i) {
-        if constexpr (std::is_integral_v<T>) {
-            values.push_back(::fromBuffer<T>(buffer));
-        } else {
-            static_assert(std::same_as<T, std::array<char, 16>>,
-                          "Unsupported type");
-            T value;
-            std::copy_n(buffer, value.size(), value.begin());
-            values.push_back(value);
-        }
-
-        buffer += unitSize();
-        buffer_size -= unitSize();
-    }
-}
-
 template <CompactArrayT T> std::string CompactArray<T>::toString() const {
     std::string res = "CompactArray{Values=";
     for (const auto &value : values) {
@@ -368,10 +328,59 @@ std::string RecordBatch::toString() const {
     return res;
 }
 
-KafkaApis::KafkaApis(const Fd &_client_fd, const TCPManager &_tcp_manager)
-    : client_fd(_client_fd), tcp_manager(_tcp_manager) {
-    readClusterMetadata();
+void ClusterMetadata::readClusterMetadata() {
+    std::cout << "Reading Cluster Metadata\n";
+
+    std::ifstream cluster_metadata_file(medata_file, std::ios::binary);
+    if (!cluster_metadata_file.is_open()) {
+        throw std::runtime_error("Failed to open cluster metadata file");
+    }
+
+    // Get file size
+    cluster_metadata_file.seekg(0, std::ios::end);
+    std::streampos fileSize = cluster_metadata_file.tellg();
+    cluster_metadata_file.seekg(0, std::ios::beg);
+
+    std::string buffer(fileSize, 0);
+    cluster_metadata_file.read(buffer.data(), fileSize);
+    cluster_metadata_file.close();
+
+    while (fileSize > 0) {
+        RecordBatch record_batch;
+        record_batch.fromBuffer(buffer.data(), fileSize);
+        fileSize -= record_batch.size();
+        buffer = buffer.substr(record_batch.size());
+
+        for (Record record : record_batch.records) {
+            std::visit(
+                [this](const auto &record) {
+                    using RecordT = std::decay_t<decltype(record)>;
+                    if constexpr (std::is_same_v<RecordT,
+                                                 Value::PartitionRecord>) {
+                        std::cout << "Partition Record: " << record.toString()
+                                  << "\n";
+                        topic_uuid_partition_id_map[record.topic_uuid]
+                            .push_back(record);
+                    } else if constexpr (std::is_same_v<RecordT,
+                                                        Value::TopicRecord>) {
+                        std::cout << "Topic Record: " << record.toString()
+                                  << "\n";
+                        std::string topic_name_str =
+                            std::string(record.topic_name.toString());
+                        topic_name_uuid_map[topic_name_str] = record.topic_uuid;
+                    }
+                },
+                record.value.record);
+        }
+    }
+
+    assert(fileSize == 0);
 }
+
+KafkaApis::KafkaApis(const Fd &_client_fd, const TCPManager &_tcp_manager,
+                     const ClusterMetadata &_cluster_metadata)
+    : client_fd(_client_fd), tcp_manager(_tcp_manager),
+      cluster_metadata(_cluster_metadata) {}
 
 void KafkaApis::classifyRequest(const char *buf, const size_t buf_size) const {
     RequestHeader request_header = RequestHeader::fromBuffer(buf, buf_size);
@@ -437,14 +446,37 @@ void KafkaApis::describeTopicPartitions(const char *buf,
 
     describe_topic_partitions_response.corellation_id =
         request_message.corellation_id;
-    describe_topic_partitions_response.array_length =
-        request_message.topics.size() + 1;
 
     for (const auto &topic : request_message.topics) {
         DescribeTopicPartitionsResponse::Topic topic1;
-        topic1.error_code = UNKNOWN_TOPIC_OR_PARTITION;
         topic1.topic_name = topic.topic_name;
-        topic1.array_length = 1; // Empty partitions array
+
+        const std::string topic_name_str =
+            std::string(topic.topic_name.toString());
+        if (cluster_metadata.topic_name_uuid_map.contains(topic_name_str)) {
+            topic1.error_code = NO_ERROR;
+            topic1.topic_uuid =
+                cluster_metadata.topic_name_uuid_map.at(topic_name_str);
+
+            for (const Value::PartitionRecord &partition_record :
+                 cluster_metadata.topic_uuid_partition_id_map.at(
+                     topic1.topic_uuid)) {
+                DescribeTopicPartitionsResponse::Partition partition;
+
+                partition.error_code = NO_ERROR;
+                partition.partition_id = partition_record.partition_id;
+                partition.leader_id = partition_record.leader_id;
+                partition.leader_epoch = partition_record.leader_epoch;
+                partition.replica_array = partition_record.replica_array;
+                partition.in_sync_replica_array =
+                    partition_record.in_sync_replica_array;
+
+                topic1.partitions.push_back(partition);
+            }
+        } else {
+            topic1.error_code = UNKNOWN_TOPIC_OR_PARTITION;
+        }
+
         topic1.authorizedOperations = {0, 0, 0x0d, char(0xf8)};
         topic1.tagged_fields = topic.tagged_fields;
 
@@ -457,33 +489,4 @@ void KafkaApis::describeTopicPartitions(const char *buf,
 
     tcp_manager.writeBufferOnClientFd(client_fd,
                                       describe_topic_partitions_response);
-}
-
-void KafkaApis::readClusterMetadata() {
-    std::cout << "Reading Cluster Metadata\n";
-
-    std::ifstream cluster_metadata_file(medata_file, std::ios::binary);
-    if (!cluster_metadata_file.is_open()) {
-        throw std::runtime_error("Failed to open cluster metadata file");
-    }
-
-    // Get file size
-    cluster_metadata_file.seekg(0, std::ios::end);
-    std::streampos fileSize = cluster_metadata_file.tellg();
-    cluster_metadata_file.seekg(0, std::ios::beg);
-
-    std::string buffer(fileSize, 0);
-    cluster_metadata_file.read(buffer.data(), fileSize);
-    cluster_metadata_file.close();
-
-    while (fileSize > 0) {
-        RecordBatch record_batch;
-        record_batch.fromBuffer(buffer.data(), fileSize);
-        std::cout << "RecordBatch: " << record_batch.toString() << std::endl;
-        std::cout << std::endl;
-        fileSize -= record_batch.size();
-        buffer = buffer.substr(record_batch.size());
-    }
-
-    assert(fileSize == 0);
 }

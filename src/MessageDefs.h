@@ -8,6 +8,20 @@
 
 #pragma pack(push, 1)
 
+template <typename T>
+concept CompactArrayT =
+    std::integral<T> || std::same_as<T, std::array<char, 16>>;
+
+template <CompactArrayT T> struct CompactArray {
+    std::vector<T> values;
+
+    static consteval size_t unitSize();
+    size_t size() const;
+    void fromBuffer(const char *buffer, size_t buffer_size);
+    std::string toBuffer() const;
+    std::string toString() const;
+};
+
 struct VariableInt {
     int32_t value = 0;
     size_t int_size = 0;
@@ -121,20 +135,33 @@ struct DescribeTopicPartitionsResponse : ResponseHeader {
     TaggedFields tagged_fields{};
     int32_t throttle_time = 0;
 
-    uint8_t array_length{}; // The length of the topics array + 1
+    struct Partition {
+        uint16_t error_code{};
+        uint32_t partition_id{};
+        uint32_t leader_id{};
+        uint32_t leader_epoch{};
+        CompactArray<uint32_t> replica_array;
+        CompactArray<uint32_t> in_sync_replica_array;
+        CompactArray<uint32_t> eligible_leader_replica_array;
+        CompactArray<uint32_t> last_known_elr_array;
+        CompactArray<uint32_t> offline_replica_array;
+        TaggedFields tagged_fields{};
+
+        std::string toBuffer() const;
+        std::string toString() const;
+    };
 
     struct Topic {
         int16_t error_code{};
         NullableString<1> topic_name{};
         std::array<char, 16> topic_uuid{};
-        bool boolInternal;
-        uint8_t array_length{}; // The length of the topics array + 1
+        bool boolInternal = false;
+        std::vector<Partition> partitions{};
         std::array<char, 4> authorizedOperations{};
         TaggedFields tagged_fields{};
 
         std::string toBuffer() const;
         std::string toString() const;
-        size_t size() const;
     };
 
     std::vector<Topic> topics{};

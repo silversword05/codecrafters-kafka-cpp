@@ -5,19 +5,6 @@
 
 #pragma pack(push, 1)
 
-template <typename T>
-concept CompactArrayT =
-    std::integral<T> || std::same_as<T, std::array<char, 16>>;
-
-template <CompactArrayT T> struct CompactArray {
-    std::vector<T> values;
-
-    static consteval size_t unitSize();
-    size_t size() const;
-    void fromBuffer(const char *buffer, size_t buffer_size);
-    std::string toString() const;
-};
-
 struct Key {
     VariableInt length;
     std::string key;
@@ -115,12 +102,28 @@ struct RecordBatch {
 
 #pragma pack(pop)
 
+struct ClusterMetadata {
+    ClusterMetadata() { readClusterMetadata(); }
+
+    std::unordered_map<std::string, std::array<char, 16>> topic_name_uuid_map;
+    std::map<std::array<char, 16>, std::vector<Value::PartitionRecord>>
+        topic_uuid_partition_id_map;
+
+    static inline const std::string medata_file =
+        "/tmp/kraft-combined-logs/__cluster_metadata-0/"
+        "00000000000000000000.log";
+
+  private:
+    void readClusterMetadata();
+};
+
 struct KafkaApis {
-    KafkaApis(const Fd &_client_fd, const TCPManager &_tcp_manager);
+    KafkaApis(const Fd &, const TCPManager &, const ClusterMetadata &);
     ~KafkaApis() = default;
 
     static constexpr uint32_t UNSUPPORTED_VERSION = 35;
     static constexpr uint16_t UNKNOWN_TOPIC_OR_PARTITION = 3;
+    static constexpr uint16_t NO_ERROR = 0;
 
     static constexpr uint16_t API_VERSIONS_REQUEST = 18;
     static constexpr uint16_t DESCRIBE_TOPIC_PARTITIONS_REQUEST = 75;
@@ -132,13 +135,5 @@ struct KafkaApis {
   private:
     const Fd &client_fd;
     const TCPManager &tcp_manager;
-
-    std::unordered_map<std::string, std::string> topic_name_uuid_map;
-    std::unordered_map<std::string, uint32_t> topic_uuid_partition_id_map;
-
-    static inline const std::string medata_file =
-        "/tmp/kraft-combined-logs/__cluster_metadata-0/"
-        "00000000000000000000.log";
-
-    void readClusterMetadata();
+    const ClusterMetadata &cluster_metadata;
 };

@@ -17,7 +17,7 @@ struct Fd {
 
     // Add move operations
     Fd(Fd &&other) noexcept : fd(other.fd) { other.fd = -1; }
-    Fd &operator=(Fd &&other) noexcept;
+    Fd &operator=(Fd &&) noexcept;
 
     void setFd(int _fd) { fd = _fd; }
     int getFd() const { return fd; }
@@ -41,12 +41,11 @@ struct TCPManager {
     void createSocketAndListen();
     Fd acceptConnections() const;
 
-    void writeBufferOnClientFd(const Fd &client_fd,
-                               const auto &response_message) const;
+    void writeBufferOnClientFd(const Fd &, const auto &) const;
 
     bool readBufferFromClientFd(
-        const Fd &client_fd,
-        const std::function<void(const char *, const size_t)> &func) const;
+        const Fd &,
+        const std::function<void(const char *, const size_t)> &) const;
 
     void addClientThread(std::jthread &&client_thread) {
         client_threads.push_back(std::move(client_thread));

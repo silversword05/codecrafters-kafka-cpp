@@ -243,8 +243,6 @@ DescribeTopicPartitionsRequest::fromBuffer(const char *buffer,
         throw std::runtime_error("Buffer size is too small");
     }
 
-    auto bufCpy = buffer;
-
     DescribeTopicPartitionsRequest describe_topic_partitions_request;
     describe_topic_partitions_request.fromBufferLocal(buffer, buffer_size);
     buffer = buffer + describe_topic_partitions_request.requestHeaderSize();
@@ -278,6 +276,179 @@ DescribeTopicPartitionsRequest::fromBuffer(const char *buffer,
     return describe_topic_partitions_request;
 }
 
+void FetchRequest::Partition::fromBufferLocal(const char *buffer,
+                                              size_t buffer_size) {
+    if (buffer_size < sizeof(int32_t)) {
+        throw std::runtime_error("Buffer size is too small");
+    }
+
+    partition_id = ::fromBuffer<int32_t>(buffer);
+    buffer += sizeof(int32_t);
+    buffer_size -= sizeof(int32_t);
+
+    current_leader_epoch = ::fromBuffer<int32_t>(buffer);
+    buffer += sizeof(int32_t);
+    buffer_size -= sizeof(int32_t);
+
+    fetch_offset = ::fromBuffer<int64_t>(buffer);
+    buffer += sizeof(int64_t);
+    buffer_size -= sizeof(int64_t);
+
+    last_fetched_epoch = ::fromBuffer<int32_t>(buffer);
+    buffer += sizeof(int32_t);
+    buffer_size -= sizeof(int32_t);
+
+    log_start_offset = ::fromBuffer<int64_t>(buffer);
+    buffer += sizeof(int64_t);
+    buffer_size -= sizeof(int64_t);
+
+    partition_max_bytes = ::fromBuffer<int32_t>(buffer);
+    buffer += sizeof(int32_t);
+    buffer_size -= sizeof(int32_t);
+
+    tagged_fields.fromBuffer(buffer, buffer_size);
+}
+
+size_t FetchRequest::Partition::size() const {
+    return offsetof(FetchRequest::Partition, tagged_fields) +
+           sizeof(TaggedFields);
+}
+
+void FetchRequest::Topic::fromBufferLocal(const char *buffer,
+                                          size_t buffer_size) {
+    if (buffer_size < sizeof(std::array<char, 16>)) {
+        throw std::runtime_error("Buffer size is too small");
+    }
+
+    std::copy_n(buffer, topic_uuid.size(), topic_uuid.begin());
+    buffer += topic_uuid.size();
+    buffer_size -= topic_uuid.size();
+
+    uint8_t array_length = ::fromBuffer<uint8_t>(buffer);
+    buffer += sizeof(uint8_t);
+    buffer_size -= sizeof(uint8_t);
+
+    for (size_t i = 0; i < array_length - 1; ++i) {
+        Partition partition;
+        partition.fromBufferLocal(buffer, buffer_size);
+        partitions.push_back(partition);
+        buffer += partition.size();
+        buffer_size -= partition.size();
+    }
+
+    tagged_fields.fromBuffer(buffer, buffer_size);
+}
+
+size_t FetchRequest::Topic::size() const {
+    size_t size = topic_uuid.size() + sizeof(uint8_t);
+    for (const auto &partition : partitions) {
+        size += partition.size();
+    }
+    return size + sizeof(TaggedFields);
+}
+
+void FetchRequest::ForgottenTopic::fromBufferLocal(const char *buffer,
+                                                   size_t buffer_size) {
+    if (buffer_size < sizeof(std::array<char, 16>)) {
+        throw std::runtime_error("Buffer size is too small");
+    }
+
+    std::copy_n(buffer, topic_uuid.size(), topic_uuid.begin());
+    buffer += topic_uuid.size();
+    buffer_size -= topic_uuid.size();
+
+    uint8_t array_length = ::fromBuffer<uint8_t>(buffer);
+    buffer += sizeof(uint8_t);
+    buffer_size -= sizeof(uint8_t);
+
+    for (size_t i = 0; i < array_length - 1; ++i) {
+        partitions.push_back(::fromBuffer<int32_t>(buffer));
+        buffer += sizeof(int32_t);
+        buffer_size -= sizeof(int32_t);
+    }
+}
+
+size_t FetchRequest::ForgottenTopic::size() const {
+    size_t size = topic_uuid.size() + sizeof(uint8_t);
+    size += sizeof(int32_t) * partitions.size();
+    return size;
+}
+
+FetchRequest FetchRequest::fromBuffer(const char *buffer, size_t buffer_size) {
+    FetchRequest fetch_request;
+    fetch_request.fromBufferLocal(buffer, buffer_size);
+    buffer = buffer + fetch_request.requestHeaderSize();
+    buffer_size = buffer_size - fetch_request.requestHeaderSize();
+
+    fetch_request.max_wait_ms = ::fromBuffer<int32_t>(buffer);
+    buffer += sizeof(int32_t);
+    buffer_size -= sizeof(int32_t);
+
+    fetch_request.min_bytes = ::fromBuffer<int32_t>(buffer);
+    buffer += sizeof(int32_t);
+    buffer_size -= sizeof(int32_t);
+
+    fetch_request.max_bytes = ::fromBuffer<int32_t>(buffer);
+    buffer += sizeof(int32_t);
+    buffer_size -= sizeof(int32_t);
+
+    fetch_request.isolation_level = ::fromBuffer<int8_t>(buffer);
+    buffer += sizeof(int8_t);
+    buffer_size -= sizeof(int8_t);
+
+    fetch_request.session_id = ::fromBuffer<int32_t>(buffer);
+    buffer += sizeof(int32_t);
+    buffer_size -= sizeof(int32_t);
+
+    fetch_request.session_epoch = ::fromBuffer<int32_t>(buffer);
+    buffer += sizeof(int32_t);
+    buffer_size -= sizeof(int32_t);
+
+    uint8_t array_length = ::fromBuffer<uint8_t>(buffer);
+    buffer += sizeof(uint8_t);
+    buffer_size -= sizeof(uint8_t);
+
+    for (size_t i = 0; i < array_length - 1; ++i) {
+        Topic topic;
+        topic.fromBufferLocal(buffer, buffer_size);
+        fetch_request.topics.push_back(topic);
+        buffer += topic.size();
+        buffer_size -= topic.size();
+    }
+
+    array_length = ::fromBuffer<uint8_t>(buffer);
+    buffer += sizeof(uint8_t);
+    buffer_size -= sizeof(uint8_t);
+
+    for (size_t i = 0; i < array_length - 1; ++i) {
+        ForgottenTopic forgotten_topic;
+        forgotten_topic.fromBufferLocal(buffer, buffer_size);
+        fetch_request.forgotten_topics.push_back(forgotten_topic);
+        buffer += forgotten_topic.size();
+        buffer_size -= forgotten_topic.size();
+    }
+
+    fetch_request.rack_id = NullableString<1>::fromBuffer(buffer, buffer_size);
+    buffer += fetch_request.rack_id.size();
+    buffer_size -= fetch_request.rack_id.size();
+
+    fetch_request.tagged_fields.fromBuffer(buffer, buffer_size);
+
+    return fetch_request;
+}
+
+std::string RequestHeader::toString() const {
+    return "RequestHeader{message_size=" + std::to_string(message_size) +
+           ", request_api_key=" + std::to_string(request_api_key) +
+           ", request_api_version=" + std::to_string(request_api_version) +
+           ", corellation_id=" + std::to_string(corellation_id) +
+           ", client_id=" + std::string(client_id.toString()) + "}";
+}
+
+std::string ApiVersionsRequestMessage::toString() const {
+    return "ApiVersionsRequestMessage{" + RequestHeader::toString() + "}";
+}
+
 std::string DescribeTopicPartitionsRequest::Topic::toString() const {
     return "Topic{topic_name=" + std::string(topic_name.toString()) +
            ", tagged_fields=" + tagged_fields.toString() + "}";
@@ -298,16 +469,62 @@ std::string DescribeTopicPartitionsRequest::toString() const {
            ", tagged_fields=" + tagged_fields.toString() + "}";
 }
 
-std::string RequestHeader::toString() const {
-    return "RequestHeader{message_size=" + std::to_string(message_size) +
-           ", request_api_key=" + std::to_string(request_api_key) +
-           ", request_api_version=" + std::to_string(request_api_version) +
-           ", corellation_id=" + std::to_string(corellation_id) +
-           ", client_id=" + std::string(client_id.toString()) + "}";
+std::string FetchRequest::Partition::toString() const {
+    return "Partition{partition_id=" + std::to_string(partition_id) +
+           ", current_leader_epoch=" + std::to_string(current_leader_epoch) +
+           ", fetch_offset=" + std::to_string(fetch_offset) +
+           ", last_fetched_epoch=" + std::to_string(last_fetched_epoch) +
+           ", log_start_offset=" + std::to_string(log_start_offset) +
+           ", partition_max_bytes=" + std::to_string(partition_max_bytes) +
+           ", tagged_fields=" + tagged_fields.toString() + "}";
 }
 
-std::string ApiVersionsRequestMessage::toString() const {
-    return "ApiVersionsRequestMessage{" + RequestHeader::toString() + "}";
+std::string FetchRequest::Topic::toString() const {
+    std::string partitions_str = "Partitions{";
+    for (const auto &partition : partitions) {
+        partitions_str += partition.toString() + ", ";
+    }
+    partitions_str += "}";
+
+    return "Topic{topic_uuid=" + charArrToHex(topic_uuid) +
+           ", partitions=" + partitions_str +
+           ", tagged_fields=" + tagged_fields.toString() + "}";
+}
+
+std::string FetchRequest::ForgottenTopic::toString() const {
+    std::string partitions_str = "Partitions{";
+    for (const auto &partition : partitions) {
+        partitions_str += std::to_string(partition) + ", ";
+    }
+    partitions_str += "}";
+
+    return "ForgottenTopic{topic_uuid=" + charArrToHex(topic_uuid) +
+           ", partitions=" + partitions_str + "}";
+}
+
+std::string FetchRequest::toString() const {
+    std::string topics_str = "Topics{";
+    for (const auto &topic : topics) {
+        topics_str += topic.toString() + ", ";
+    }
+    topics_str += "}";
+
+    std::string forgotten_topics_str = "ForgottenTopics{";
+    for (const auto &forgotten_topic : forgotten_topics) {
+        forgotten_topics_str += forgotten_topic.toString() + ", ";
+    }
+    forgotten_topics_str += "}";
+
+    return "FetchRequest{max_wait_ms=" + std::to_string(max_wait_ms) +
+           ", min_bytes=" + std::to_string(min_bytes) +
+           ", max_bytes=" + std::to_string(max_bytes) +
+           ", isolation_level=" + std::to_string(isolation_level) +
+           ", session_id=" + std::to_string(session_id) +
+           ", session_epoch=" + std::to_string(session_epoch) +
+           ", topics=" + topics_str +
+           ", forgotten_topics=" + forgotten_topics_str +
+           ", rack_id=" + std::string(rack_id.toString()) +
+           ", tagged_fields=" + tagged_fields.toString() + "}";
 }
 
 std::string ApiVersionsResponseMessage::ApiKey::toBuffer() const {
@@ -407,6 +624,74 @@ std::string DescribeTopicPartitionsResponse::toBuffer() const {
     return buffer;
 }
 
+std::string FetchResponse::AbortedTransactions::toBuffer() const {
+    std::string buffer;
+
+    buffer.append(::toBuffer<int64_t>(producer_id));
+    buffer.append(::toBuffer<int64_t>(first_offset));
+    buffer.append(tagged_fields.toBuffer());
+
+    return buffer;
+}
+
+std::string FetchResponse::Partition::toBuffer() const {
+    std::string buffer;
+
+    buffer.append(::toBuffer<uint32_t>(partition_id));
+    buffer.append(::toBuffer<uint16_t>(error_code));
+    buffer.append(::toBuffer<int64_t>(high_watermark));
+    buffer.append(::toBuffer<int64_t>(last_stable_offset));
+    buffer.append(::toBuffer<int64_t>(log_start_offset));
+
+    buffer.append(::toBuffer<uint8_t>(aborted_transactions.size() + 1));
+    for (const auto &aborted_transaction : aborted_transactions) {
+        buffer.append(aborted_transaction.toBuffer());
+    }
+
+    buffer.append(::toBuffer<int32_t>(preferred_read_replica));
+    buffer.append(::toBuffer<uint8_t>(records_count));
+    buffer.append(tagged_fields.toBuffer());
+
+    return buffer;
+}
+
+std::string FetchResponse::Topic::toBuffer() const {
+    std::string buffer;
+
+    buffer.append(topic_uuid.data(), topic_uuid.size());
+
+    buffer.append(::toBuffer<uint8_t>(partitions.size() + 1));
+    for (const auto &partition : partitions) {
+        buffer.append(partition.toBuffer());
+    }
+
+    buffer.append(tagged_fields.toBuffer());
+
+    return buffer;
+}
+
+std::string FetchResponse::toBuffer() const {
+    std::string buffer = "XXXX"; // These are 4 bytes for message_size
+
+    buffer.append(::toBuffer(corellation_id));
+    buffer.append(tagged_fieldsH.toBuffer());
+    buffer.append(::toBuffer<int32_t>(throttle_time));
+    buffer.append(::toBuffer<int16_t>(error_code));
+    buffer.append(::toBuffer<int32_t>(session_id));
+
+    buffer.append(::toBuffer<uint8_t>(topics.size() + 1));
+    for (const auto &topic : topics) {
+        buffer.append(topic.toBuffer());
+    }
+
+    buffer.append(tagged_fieldsT.toBuffer());
+
+    // Update the message size
+    *reinterpret_cast<uint32_t *>(buffer.data()) = htonl(buffer.size() - 4);
+
+    return buffer;
+}
+
 std::string ApiVersionsResponseMessage::toString() const {
     std::string api_keys_str = "ApiKeys{";
     for (const auto &api_key : api_keys) {
@@ -470,6 +755,63 @@ std::string DescribeTopicPartitionsResponse::toString() const {
            ", array_length=" + std::to_string(topics.size() + 1) +
            ", topics=" + topics_str + ", cursor=" + std::to_string(cursor) +
            ", tagged_fields=" + tagged_field.toString() + "}";
+}
+
+std::string FetchResponse::AbortedTransactions::toString() const {
+    return "AbortedTransactions{producer_id=" + std::to_string(producer_id) +
+           ", first_offset=" + std::to_string(first_offset) +
+           ", tagged_fields=" + tagged_fields.toString() + "}";
+}
+
+std::string FetchResponse::Partition::toString() const {
+    std::string aborted_transactions_str = "AbortedTransactions{";
+    for (const auto &aborted_transaction : aborted_transactions) {
+        aborted_transactions_str += aborted_transaction.toString() + ", ";
+    }
+    aborted_transactions_str += "}";
+
+    return "Partition{partition_id=" + std::to_string(partition_id) +
+           ", error_code=" + std::to_string(error_code) +
+           ", high_watermark=" + std::to_string(high_watermark) +
+           ", last_stable_offset=" + std::to_string(last_stable_offset) +
+           ", log_start_offset=" + std::to_string(log_start_offset) +
+           ", array_length=" + std::to_string(aborted_transactions.size() + 1) +
+           ", aborted_transactions=" + aborted_transactions_str +
+           ", preferred_read_replica=" +
+           std::to_string(preferred_read_replica) +
+           ", records_count=" + std::to_string(records_count) +
+           ", tagged_fields=" + tagged_fields.toString() + "}";
+}
+
+std::string FetchResponse::Topic::toString() const {
+    std::string partitions_str = "Partitions{";
+    for (const auto &partition : partitions) {
+        partitions_str += partition.toString() + ", ";
+    }
+    partitions_str += "}";
+
+    return "Topic{topic_uuid=" + charArrToHex(topic_uuid) +
+           ", array_length=" + std::to_string(partitions.size() + 1) +
+           ", partitions=" + partitions_str +
+           ", tagged_fields=" + tagged_fields.toString() + "}";
+}
+
+std::string FetchResponse::toString() const {
+    std::string topics_str = "Topics{";
+    for (const auto &topic : topics) {
+        topics_str += topic.toString() + ", ";
+    }
+    topics_str += "}";
+
+    return "FetchResponse{message_size=" + std::to_string(message_size) +
+           ", corellation_id=" + std::to_string(corellation_id) +
+           ", tagged_fields (head)=" + tagged_fieldsH.toString() +
+           ", throttle_time=" + std::to_string(throttle_time) +
+           ", error_code=" + std::to_string(error_code) +
+           ", session_id=" + std::to_string(session_id) +
+           ", array_length=" + std::to_string(topics.size() + 1) +
+           ", topics=" + topics_str +
+           ", tagged_fields (tail)=" + tagged_fieldsT.toString() + "}";
 }
 
 #pragma diagnostic(pop)

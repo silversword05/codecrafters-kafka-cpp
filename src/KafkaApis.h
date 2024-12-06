@@ -132,6 +132,7 @@ struct KafkaApis {
     void classifyRequest(const char *buf, const size_t buf_size) const;
     void checkApiVersions(const char *buf, const size_t buf_size) const;
     void describeTopicPartitions(const char *buf, const size_t buf_size) const;
+    void fetchTopicMessages(const char *buf, const size_t buf_size) const;
 
   private:
     const Fd &client_fd;

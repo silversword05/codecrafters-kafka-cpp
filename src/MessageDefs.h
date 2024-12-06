@@ -99,6 +99,56 @@ struct DescribeTopicPartitionsRequest : RequestHeader {
     std::string toString() const;
 };
 
+struct FetchRequest : RequestHeader {
+    int32_t max_wait_ms;
+    int32_t min_bytes;
+    int32_t max_bytes;
+    int8_t isolation_level;
+    int32_t session_id;
+    int32_t session_epoch;
+
+    struct Partition {
+        int32_t partition_id;
+        int32_t current_leader_epoch;
+        int64_t fetch_offset;
+        int32_t last_fetched_epoch;
+        int64_t log_start_offset;
+        int32_t partition_max_bytes;
+        TaggedFields tagged_fields{};
+
+        void fromBufferLocal(const char *buffer, size_t buffer_size);
+        std::string toString() const;
+        size_t size() const;
+    };
+
+    struct Topic {
+        std::array<char, 16> topic_uuid;
+        std::vector<Partition> partitions{};
+        TaggedFields tagged_fields{};
+
+        void fromBufferLocal(const char *buffer, size_t buffer_size);
+        std::string toString() const;
+        size_t size() const;
+    };
+
+    struct ForgottenTopic {
+        std::array<char, 16> topic_uuid;
+        std::vector<int32_t> partitions;
+
+        void fromBufferLocal(const char *buffer, size_t buffer_size);
+        std::string toString() const;
+        size_t size() const;
+    };
+
+    std::vector<Topic> topics{};
+    std::vector<ForgottenTopic> forgotten_topics;
+    NullableString<1> rack_id;
+    TaggedFields tagged_fields{};
+
+    static FetchRequest fromBuffer(const char *buffer, size_t buffer_size);
+    std::string toString() const;
+};
+
 constexpr size_t MAX_BUFFER_SIZE = 1024;
 
 struct ResponseHeader : Header {
@@ -163,6 +213,52 @@ struct DescribeTopicPartitionsResponse : ResponseHeader {
     std::vector<Topic> topics{};
     uint8_t cursor = 0;
     TaggedFields tagged_field{};
+
+    std::string toBuffer() const;
+    std::string toString() const;
+};
+
+struct FetchResponse : ResponseHeader {
+    TaggedFields tagged_fieldsH{};
+    int32_t throttle_time = 0;
+    int16_t error_code = 0;
+    int32_t session_id = 0;
+
+    struct AbortedTransactions {
+        int64_t producer_id;
+        int64_t first_offset;
+        TaggedFields tagged_fields{};
+
+        std::string toBuffer() const;
+        std::string toString() const;
+    };
+
+    struct Partition {
+        uint32_t partition_id{};
+        uint16_t error_code{};
+        int64_t high_watermark{};
+        int64_t last_stable_offset{};
+        int64_t log_start_offset{};
+        std::vector<AbortedTransactions> aborted_transactions;
+        int32_t preferred_read_replica{};
+        uint8_t records_count = 1; // empty records array
+        TaggedFields tagged_fields{};
+
+        std::string toBuffer() const;
+        std::string toString() const;
+    };
+
+    struct Topic {
+        std::array<char, 16> topic_uuid;
+        std::vector<FetchResponse::Partition> partitions;
+        TaggedFields tagged_fields{};
+
+        std::string toBuffer() const;
+        std::string toString() const;
+    };
+
+    std::vector<Topic> topics;
+    TaggedFields tagged_fieldsT{};
 
     std::string toBuffer() const;
     std::string toString() const;

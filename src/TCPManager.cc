@@ -135,3 +135,5 @@ TCPManager::writeBufferOnClientFd(const Fd &,
                                   const ApiVersionsResponseMessage &) const;
 template void TCPManager::writeBufferOnClientFd(
     const Fd &, const DescribeTopicPartitionsResponse &) const;
+template void TCPManager::writeBufferOnClientFd(const Fd &,
+                                                const FetchResponse &) const;

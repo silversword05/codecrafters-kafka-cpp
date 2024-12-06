@@ -394,6 +394,9 @@ void KafkaApis::classifyRequest(const char *buf, const size_t buf_size) const {
     case DESCRIBE_TOPIC_PARTITIONS_REQUEST:
         describeTopicPartitions(buf, buf_size);
         break;
+    case FETCH_REQUEST:
+        fetchTopicMessages(buf, buf_size);
+        break;
     default:
         std::cout << "Unsupported API key: " << request_header.request_api_key
                   << "\n";
@@ -503,4 +506,17 @@ void KafkaApis::describeTopicPartitions(const char *buf,
 
     tcp_manager.writeBufferOnClientFd(client_fd,
                                       describe_topic_partitions_response);
+}
+
+void KafkaApis::fetchTopicMessages(const char *buf,
+                                   const size_t buf_size) const {
+    FetchRequest request_message = FetchRequest::fromBuffer(buf, buf_size);
+
+    std::cout << "Received Fetch Request: " << request_message.toString()
+              << "\n";
+
+    FetchResponse fetch_response;
+    fetch_response.corellation_id = request_message.corellation_id;
+
+    tcp_manager.writeBufferOnClientFd(client_fd, fetch_response);
 }

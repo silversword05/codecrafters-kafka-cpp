@@ -115,6 +115,7 @@ struct ClusterMetadata {
 
   private:
     void readClusterMetadata();
+    void waitForFileToExist() const;
 };
 
 struct KafkaApis {
@@ -124,6 +125,7 @@ struct KafkaApis {
     static constexpr uint32_t UNSUPPORTED_VERSION = 35;
     static constexpr uint16_t UNKNOWN_TOPIC_OR_PARTITION = 3;
     static constexpr uint16_t NO_ERROR = 0;
+    static constexpr uint16_t UNKNOWN_TOPIC = 100;
 
     static constexpr uint16_t API_VERSIONS_REQUEST = 18;
     static constexpr uint16_t DESCRIBE_TOPIC_PARTITIONS_REQUEST = 75;

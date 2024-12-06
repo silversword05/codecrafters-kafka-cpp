@@ -328,6 +328,18 @@ std::string RecordBatch::toString() const {
     return res;
 }
 
+void ClusterMetadata::waitForFileToExist() const {
+    int cnt = 100;
+    while (cnt--) {
+        if (std::filesystem::exists(medata_file)) {
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+    }
+    assert((std::filesystem::exists(medata_file) == true`,
+            "Tried to sleep for 100 seconds but file still doesn't exist"));
+}
+
 void ClusterMetadata::readClusterMetadata() {
     std::cout << "Reading Cluster Metadata\n";
 
@@ -374,7 +386,7 @@ void ClusterMetadata::readClusterMetadata() {
         }
     }
 
-    assert(fileSize == 0);
+    assert((fileSize == 0, "metadata file not read completely"));
 }
 
 KafkaApis::KafkaApis(const Fd &_client_fd, const TCPManager &_tcp_manager,
@@ -517,6 +529,18 @@ void KafkaApis::fetchTopicMessages(const char *buf,
 
     FetchResponse fetch_response;
     fetch_response.corellation_id = request_message.corellation_id;
+    fetch_response.error_code = NO_ERROR;
+
+    for (const FetchRequest::Topic &request_topic : request_message.topics) {
+        FetchResponse::Topic topic;
+        topic.topic_uuid = request_topic.topic_uuid;
+
+        FetchResponse::Partition partition;
+        partition.error_code = UNKNOWN_TOPIC;
+        topic.partitions.push_back(partition);
+
+        fetch_response.topics.push_back(topic);
+    }
 
     tcp_manager.writeBufferOnClientFd(client_fd, fetch_response);
 }

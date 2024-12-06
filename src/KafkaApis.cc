@@ -336,7 +336,7 @@ void ClusterMetadata::waitForFileToExist() const {
         }
         std::this_thread::sleep_for(std::chrono::seconds(1));
     }
-    assert((std::filesystem::exists(medata_file) == true`,
+    assert((std::filesystem::exists(medata_file) == true,
             "Tried to sleep for 100 seconds but file still doesn't exist"));
 }
 

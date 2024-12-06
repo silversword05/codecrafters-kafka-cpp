@@ -536,7 +536,7 @@ void KafkaApis::fetchTopicMessages(const char *buf,
         topic.topic_uuid = request_topic.topic_uuid;
 
         FetchResponse::Partition partition;
-        partition.error_code = UNKNOWN_TOPIC;
+        partition.error_code = NO_ERROR;
         topic.partitions.push_back(partition);
 
         fetch_response.topics.push_back(topic);

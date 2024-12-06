@@ -535,9 +535,20 @@ void KafkaApis::fetchTopicMessages(const char *buf,
         FetchResponse::Topic topic;
         topic.topic_uuid = request_topic.topic_uuid;
 
-        FetchResponse::Partition partition;
-        partition.error_code = NO_ERROR;
-        topic.partitions.push_back(partition);
+        const auto it =
+            cluster_metadata.topic_uuid_partition_id_map.find(topic.topic_uuid);
+        if (it != cluster_metadata.topic_uuid_partition_id_map.end()) {
+            for (const auto &partition_val : it->second) {
+                FetchResponse::Partition partition;
+                partition.error_code = NO_ERROR;
+                partition.partition_id = partition_val.partition_id;
+                topic.partitions.push_back(partition);
+            }
+        } else {
+            FetchResponse::Partition partition;
+            partition.error_code = UNKNOWN_TOPIC;
+            topic.partitions.push_back(partition);
+        }
 
         fetch_response.topics.push_back(topic);
     }

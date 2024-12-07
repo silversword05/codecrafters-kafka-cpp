@@ -16,16 +16,6 @@ void Key::fromBuffer(const char *buffer, size_t buffer_size) {
     }
 }
 
-std::string Key::toBuffer() const {
-    std::string buffer;
-    buffer.append(length.toBuffer());
-
-    if (length != -1) {
-        buffer.append(key);
-    }
-    return buffer;
-}
-
 std::string Key::toString() const {
     return "Key{key=" + (key.empty() ? "<null>" : key) + "}";
 }
@@ -86,23 +76,6 @@ void Value::PartitionRecord::fromBuffer(const char *buffer,
     tagged_fields_count = ::fromBuffer<uint8_t>(buffer);
 }
 
-std::string Value::PartitionRecord::toBuffer() const {
-    std::string buffer;
-
-    buffer.append(::toBuffer(partition_id));
-    buffer.append(topic_uuid.data(), topic_uuid.size());
-    buffer.append(replica_array.toBuffer());
-    buffer.append(in_sync_replica_array.toBuffer());
-    buffer.append(removing_replica_array.toBuffer());
-    buffer.append(adding_replica_array.toBuffer());
-    buffer.append(::toBuffer(leader_id));
-    buffer.append(::toBuffer(leader_epoch));
-    buffer.append(::toBuffer(partition_epoch));
-    buffer.append(directories_array.toBuffer());
-    buffer.append(::toBuffer(tagged_fields_count));
-    return buffer;
-}
-
 std::string Value::PartitionRecord::toString() const {
     return "PartitionRecord{partition_id=" + std::to_string(partition_id) +
            ", topic_uuid=" + charArrToHex(topic_uuid) +
@@ -132,14 +105,6 @@ void Value::TopicRecord::fromBuffer(const char *buffer, size_t buffer_size) {
     buffer_size -= topic_uuid.size();
 
     tagged_fields_count = ::fromBuffer<uint8_t>(buffer);
-}
-
-std::string Value::TopicRecord::toBuffer() const {
-    std::string buffer;
-    buffer.append(topic_name.toBuffer());
-    buffer.append(topic_uuid.data(), topic_uuid.size());
-    buffer.append(::toBuffer(tagged_fields_count));
-    return buffer;
 }
 
 std::string Value::TopicRecord::toString() const {
@@ -193,20 +158,6 @@ void Value::fromBuffer(const char *buffer, size_t buffer_size) {
                   << std::endl;
     }
     }
-}
-
-std::string Value::toBuffer() const {
-    std::string buffer;
-    buffer.append(length.toBuffer());
-    buffer.append(::toBuffer(frame_version));
-    buffer.append(::toBuffer(record_type));
-    buffer.append(::toBuffer(record_version));
-
-    std::visit(
-        [&buffer](const auto &record) { buffer.append(record.toBuffer()); },
-        record);
-
-    return buffer;
 }
 
 std::string Value::toString() const {
@@ -371,12 +322,18 @@ void ClusterMetadata::waitForFileToExist() const {
         }
         std::this_thread::sleep_for(std::chrono::seconds(1));
     }
+
     assert((std::filesystem::exists(medata_file) == true,
             "Tried to sleep for 100 seconds but file still doesn't exist"));
+
+    // Sleep some more to make sure the file is completely written
+    std::this_thread::sleep_for(std::chrono::seconds(1));
 }
 
 void ClusterMetadata::readClusterMetadata() {
     std::cout << "Reading Cluster Metadata\n";
+
+    waitForFileToExist();
 
     std::ifstream cluster_metadata_file(medata_file, std::ios::binary);
     if (!cluster_metadata_file.is_open()) {

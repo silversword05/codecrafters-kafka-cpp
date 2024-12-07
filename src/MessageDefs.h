@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ClusterMetadata.h"
 #include "Utils.h"
 #include <arpa/inet.h>
 #include <netdb.h>
@@ -196,7 +197,7 @@ struct FetchResponse : ResponseHeader {
         int64_t log_start_offset{};
         std::vector<AbortedTransactions> aborted_transactions;
         int32_t preferred_read_replica{};
-        std::string records_buffer{};
+        std::vector<std::string> record_batches;
         TaggedFields tagged_fields{};
 
         std::string toBuffer() const;

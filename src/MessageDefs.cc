@@ -487,8 +487,12 @@ std::string FetchResponse::Partition::toBuffer() const {
     }
 
     buffer.append(::toBuffer<int32_t>(preferred_read_replica));
-    buffer.append(::toBuffer<uint8_t>(2));
-    buffer.append(records_buffer);
+
+    buffer.append(::toBuffer<uint8_t>(record_batches.size() + 1));
+    for (const auto &record_batch : record_batches) {
+        buffer.append(record_batch);
+    }
+
     buffer.append(tagged_fields.toBuffer());
 
     return buffer;
@@ -609,6 +613,13 @@ std::string FetchResponse::Partition::toString() const {
     }
     aborted_transactions_str += "}";
 
+    std::string record_batches_str = "RecordBatches{";
+    for (const auto &record_batch_str : record_batches) {
+        record_batches_str +=
+            "< " + std::to_string(record_batches_str.size()) + "  >, ";
+    }
+    record_batches_str += "}";
+
     return "Partition{partition_id=" + std::to_string(partition_id) +
            ", error_code=" + std::to_string(error_code) +
            ", high_watermark=" + std::to_string(high_watermark) +
@@ -617,8 +628,8 @@ std::string FetchResponse::Partition::toString() const {
            ", array_length=" + std::to_string(aborted_transactions.size() + 1) +
            ", aborted_transactions=" + aborted_transactions_str +
            ", preferred_read_replica=" +
-           std::to_string(preferred_read_replica) + ", records=< " +
-           std::to_string(records_buffer.size()) + " >" +
+           std::to_string(preferred_read_replica) +
+           ", records=" + record_batches_str +
            ", tagged_fields=" + tagged_fields.toString() + "}";
 }
 

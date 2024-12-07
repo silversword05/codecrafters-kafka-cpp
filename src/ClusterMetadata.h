@@ -11,7 +11,6 @@ struct Key {
     size_t size() const;
     void fromBuffer(const char *buffer, size_t buffer_size);
     std::string toString() const;
-    std::string toBuffer() const;
 };
 
 struct Value {
@@ -35,7 +34,6 @@ struct Value {
         size_t size() const;
         void fromBuffer(const char *buffer, size_t buffer_size);
         std::string toString() const;
-        std::string toBuffer() const;
     };
 
     struct TopicRecord {
@@ -47,13 +45,11 @@ struct Value {
         size_t size() const;
         void fromBuffer(const char *buffer, size_t buffer_size);
         std::string toString() const;
-        std::string toBuffer() const;
     };
 
     struct NoRecord {
         NoRecord() noexcept = default;
         std::string toString() const { return "NoRecord{}"; }
-        std::string toBuffer() const { return ""; }
     };
 
     using RecordT = std::variant<NoRecord, PartitionRecord, TopicRecord>;
@@ -67,7 +63,6 @@ struct Value {
     size_t size() const;
     void fromBuffer(const char *buffer, size_t buffer_size);
     std::string toString() const;
-    std::string toBuffer() const;
 };
 
 struct Record {

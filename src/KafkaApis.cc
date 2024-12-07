@@ -150,7 +150,7 @@ void KafkaApis::fetchTopicMessages(const char *buf,
         const auto it =
             cluster_metadata.topic_uuid_partition_id_map.find(topic.topic_uuid);
         if (it != cluster_metadata.topic_uuid_partition_id_map.end()) {
-            for (const auto &partition_val : it->second) {
+            for (const auto &partition_val : request_topic.partitions) {
 
                 std::string partition_file =
                     cluster_metadata.readPartitionTopicsFile(

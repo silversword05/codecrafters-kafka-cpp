@@ -24,6 +24,7 @@ struct VariableInt {
     size_t int_size = 0;
 
     void fromBuffer(const char *buffer);
+    std::string toBuffer() const;
     size_t size() const { return int_size; }
     operator int() const { return value; }
 };

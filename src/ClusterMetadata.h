@@ -11,6 +11,7 @@ struct Key {
     size_t size() const;
     void fromBuffer(const char *buffer, size_t buffer_size);
     std::string toString() const;
+    std::string toBuffer() const;
 };
 
 struct Value {
@@ -34,6 +35,7 @@ struct Value {
         size_t size() const;
         void fromBuffer(const char *buffer, size_t buffer_size);
         std::string toString() const;
+        std::string toBuffer() const;
     };
 
     struct TopicRecord {
@@ -45,11 +47,13 @@ struct Value {
         size_t size() const;
         void fromBuffer(const char *buffer, size_t buffer_size);
         std::string toString() const;
+        std::string toBuffer() const;
     };
 
     struct NoRecord {
         NoRecord() noexcept = default;
         std::string toString() const { return "NoRecord{}"; }
+        std::string toBuffer() const { return ""; }
     };
 
     using RecordT = std::variant<NoRecord, PartitionRecord, TopicRecord>;
@@ -59,10 +63,11 @@ struct Value {
     uint8_t record_type{};
     uint8_t record_version{};
     RecordT record;
-    
+
     size_t size() const;
     void fromBuffer(const char *buffer, size_t buffer_size);
     std::string toString() const;
+    std::string toBuffer() const;
 };
 
 struct Record {
@@ -104,13 +109,18 @@ struct RecordBatch {
 struct ClusterMetadata {
     ClusterMetadata() { readClusterMetadata(); }
 
-    std::unordered_map<std::string, std::array<char, 16>> topic_name_uuid_map;
-    std::map<std::array<char, 16>, std::vector<Value::PartitionRecord>>
-        topic_uuid_partition_id_map;
+    std::string
+    readPartitionTopicsFile(uint32_t partition_id,
+                            const std::array<char, 16> topic_id) const;
 
     static inline const std::string medata_file =
         "/tmp/kraft-combined-logs/__cluster_metadata-0/"
         "00000000000000000000.log";
+
+    std::unordered_map<std::string, std::array<char, 16>> topic_name_uuid_map;
+    std::map<std::array<char, 16>, std::string> topic_uuid_name_map;
+    std::map<std::array<char, 16>, std::vector<Value::PartitionRecord>>
+        topic_uuid_partition_id_map;
 
   private:
     void readClusterMetadata();

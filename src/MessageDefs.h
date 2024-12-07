@@ -196,7 +196,7 @@ struct FetchResponse : ResponseHeader {
         int64_t log_start_offset{};
         std::vector<AbortedTransactions> aborted_transactions;
         int32_t preferred_read_replica{};
-        uint8_t records_count = 5; // empty records array
+        std::string records_buffer{};
         TaggedFields tagged_fields{};
 
         std::string toBuffer() const;

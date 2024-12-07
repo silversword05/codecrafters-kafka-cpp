@@ -151,9 +151,15 @@ void KafkaApis::fetchTopicMessages(const char *buf,
             cluster_metadata.topic_uuid_partition_id_map.find(topic.topic_uuid);
         if (it != cluster_metadata.topic_uuid_partition_id_map.end()) {
             for (const auto &partition_val : it->second) {
+
+                std::string partition_file =
+                    cluster_metadata.readPartitionTopicsFile(
+                        partition_val.partition_id, topic.topic_uuid);
+
                 FetchResponse::Partition partition;
                 partition.error_code = NO_ERROR;
                 partition.partition_id = partition_val.partition_id;
+                partition.records_buffer = partition_file;
                 topic.partitions.push_back(partition);
             }
         } else {

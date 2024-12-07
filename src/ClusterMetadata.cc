@@ -16,6 +16,16 @@ void Key::fromBuffer(const char *buffer, size_t buffer_size) {
     }
 }
 
+std::string Key::toBuffer() const {
+    std::string buffer;
+    buffer.append(length.toBuffer());
+
+    if (length != -1) {
+        buffer.append(key);
+    }
+    return buffer;
+}
+
 std::string Key::toString() const {
     return "Key{key=" + (key.empty() ? "<null>" : key) + "}";
 }
@@ -76,6 +86,23 @@ void Value::PartitionRecord::fromBuffer(const char *buffer,
     tagged_fields_count = ::fromBuffer<uint8_t>(buffer);
 }
 
+std::string Value::PartitionRecord::toBuffer() const {
+    std::string buffer;
+
+    buffer.append(::toBuffer(partition_id));
+    buffer.append(topic_uuid.data(), topic_uuid.size());
+    buffer.append(replica_array.toBuffer());
+    buffer.append(in_sync_replica_array.toBuffer());
+    buffer.append(removing_replica_array.toBuffer());
+    buffer.append(adding_replica_array.toBuffer());
+    buffer.append(::toBuffer(leader_id));
+    buffer.append(::toBuffer(leader_epoch));
+    buffer.append(::toBuffer(partition_epoch));
+    buffer.append(directories_array.toBuffer());
+    buffer.append(::toBuffer(tagged_fields_count));
+    return buffer;
+}
+
 std::string Value::PartitionRecord::toString() const {
     return "PartitionRecord{partition_id=" + std::to_string(partition_id) +
            ", topic_uuid=" + charArrToHex(topic_uuid) +
@@ -105,6 +132,14 @@ void Value::TopicRecord::fromBuffer(const char *buffer, size_t buffer_size) {
     buffer_size -= topic_uuid.size();
 
     tagged_fields_count = ::fromBuffer<uint8_t>(buffer);
+}
+
+std::string Value::TopicRecord::toBuffer() const {
+    std::string buffer;
+    buffer.append(topic_name.toBuffer());
+    buffer.append(topic_uuid.data(), topic_uuid.size());
+    buffer.append(::toBuffer(tagged_fields_count));
+    return buffer;
 }
 
 std::string Value::TopicRecord::toString() const {
@@ -158,6 +193,20 @@ void Value::fromBuffer(const char *buffer, size_t buffer_size) {
                   << std::endl;
     }
     }
+}
+
+std::string Value::toBuffer() const {
+    std::string buffer;
+    buffer.append(length.toBuffer());
+    buffer.append(::toBuffer(frame_version));
+    buffer.append(::toBuffer(record_type));
+    buffer.append(::toBuffer(record_version));
+
+    std::visit(
+        [&buffer](const auto &record) { buffer.append(record.toBuffer()); },
+        record);
+
+    return buffer;
 }
 
 std::string Value::toString() const {
@@ -366,6 +415,7 @@ void ClusterMetadata::readClusterMetadata() {
                         std::string topic_name_str =
                             std::string(record.topic_name.toString());
                         topic_name_uuid_map[topic_name_str] = record.topic_uuid;
+                        topic_uuid_name_map[record.topic_uuid] = topic_name_str;
                     }
                 },
                 record.value.record);
@@ -373,4 +423,27 @@ void ClusterMetadata::readClusterMetadata() {
     }
 
     assert((fileSize == 0, "metadata file not read completely"));
+}
+
+std::string ClusterMetadata::readPartitionTopicsFile(
+    uint32_t partition_id, const std::array<char, 16> topic_id) const {
+    std::string topic = topic_uuid_name_map.at(topic_id);
+    const std::string file_name = "/tmp/kraft-combined-logs/" + topic + "-" +
+                                  std::to_string(partition_id) +
+                                  "/00000000000000000000.log";
+
+    std::ifstream partition_topics_file(file_name, std::ios::binary);
+    if (!partition_topics_file.is_open()) {
+        throw std::runtime_error("Failed to open partition topics file");
+    }
+
+    std::cout << "Reading Partition Topics File: " << file_name << "\n";
+
+    std::string res =
+        std::string(std::istreambuf_iterator<char>(partition_topics_file),
+                    std::istreambuf_iterator<char>());
+
+    hexdump(res.data(), res.size());
+
+    return res;
 }

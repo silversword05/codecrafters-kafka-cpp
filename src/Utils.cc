@@ -2,6 +2,11 @@
 
 #pragma GCC diagnostic ignored "-Winvalid-offsetof"
 
+namespace {
+auto zigzagDecode(auto x) { return (x >> 1) ^ (-(x & 1)); }
+auto zigzagEncode(auto n) { return (n << 1) ^ (n >> 31); }
+} // namespace
+
 class IosFlagSaver {
   public:
     explicit IosFlagSaver(std::ostream &_ios) : ios(_ios), f(_ios.flags()) {}
@@ -101,8 +106,6 @@ template <CompactArrayT T> std::string CompactArray<T>::toString() const {
     return res + "}";
 }
 
-auto zigzagDecode(auto x) { return (x >> 1) ^ (-(x & 1)); }
-
 void VariableInt::fromBuffer(const char *buffer) {
     int shift = 0;
 
@@ -118,6 +121,19 @@ void VariableInt::fromBuffer(const char *buffer) {
     }
 
     value = zigzagDecode(value);
+}
+
+std::string VariableInt::toBuffer() const {
+    std::string buffer;
+    int32_t value = zigzagEncode(value);
+
+    while (value > 0x7F) {
+        buffer.push_back((value & 0x7F) | 0x80);
+        value >>= 7;
+    }
+
+    buffer.push_back(value);
+    return buffer;
 }
 
 template <size_t N>
